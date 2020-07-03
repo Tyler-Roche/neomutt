@@ -603,6 +603,41 @@ static void update_index_unthreaded(struct Context *ctx, int check, int oldcount
 }
 
 /**
+ * struct SelectedEmail - keep track of the currently selected email.
+ */
+struct SelectedEmail
+{
+  time_t received;  ///< From Email.received
+  char *message_id; ///< From Email.Envelope.message_id
+};
+
+/**
+ * is_current_email - Check whether an email is the currently selected email.
+ * @param curr  Currently selected email
+ * @param e     Email to check
+ * @retval true e is curr
+ * @retval false e is not curr
+ */
+static bool is_current_email(const struct SelectedEmail *curr, const struct Email *e)
+{
+  return (e->received == curr->received) &&
+         mutt_str_equal(e->env->message_id, curr->message_id);
+}
+
+/**
+ * set_current_email - Keep track of the currently selected email.
+ * @param curr Currently selected email
+ * @param e    Email to set as current
+ */
+static void set_current_email(struct SelectedEmail *curr, const struct Email *e)
+{
+  *curr = (struct SelectedEmail){
+    .received = e ? e->received : 0,
+    .message_id = mutt_str_replace(&curr->message_id, e ? e->env->message_id : NULL)
+  };
+}
+
+/**
  * update_index - Update the index
  * @param menu       Current Menu
  * @param ctx        Mailbox
@@ -610,8 +645,8 @@ static void update_index_unthreaded(struct Context *ctx, int check, int oldcount
  * @param oldcount   How many items are currently in the index
  * @param curr_msgid Remember our place in the index
  */
-void update_index(struct Menu *menu, struct Context *ctx, int check,
-                  int oldcount, const char *curr_msgid)
+static void update_index(struct Menu *menu, struct Context *ctx, int check,
+                         int oldcount, const struct SelectedEmail *curr)
 {
   if (!menu || !ctx)
     return;
@@ -630,7 +665,7 @@ void update_index(struct Menu *menu, struct Context *ctx, int check,
       struct Email *e = mutt_get_virt_email(ctx->mailbox, i);
       if (!e)
         continue;
-      if (mutt_str_equal(e->env->message_id, curr_msgid))
+      if (is_current_email(curr, e))
       {
         menu->current = i;
         break;
@@ -640,6 +675,23 @@ void update_index(struct Menu *menu, struct Context *ctx, int check,
 
   if (menu->current < 0)
     menu->current = ci_first_message(Context);
+}
+
+/**
+ * mutt_update_index - Update the index
+ * @param menu       Current Menu
+ * @param ctx        Mailbox
+ * @param check      Flags, e.g. #MUTT_REOPENED
+ * @param oldcount   How many items are currently in the index
+ * @param curr_email Currently selected email
+ * @note curr_email can not be NULL.
+ */
+void mutt_update_index(struct Menu *menu, struct Context *ctx, int check,
+                       int oldcount, const struct Email *curr_email)
+{
+  struct SelectedEmail se = { .received = curr_email->received,
+                              .message_id = curr_email->env->message_id };
+  update_index(menu, ctx, check, oldcount, &se);
 }
 
 /**
@@ -667,11 +719,11 @@ static int mailbox_index_observer(struct NotifyCallback *nc)
  * @param menu       Current Menu
  * @param m          Mailbox
  * @param oldcount   How many items are currently in the index
- * @param curr_msgid Remember our place in the index
+ * @param curr       Remember our place in the index
  * @param read_only  Open Mailbox in read-only mode
  */
 static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m, int *oldcount,
-                                  const char *curr_msgid, bool read_only)
+                                  const struct SelectedEmail *curr, bool read_only)
 {
   if (!m)
     return;
@@ -702,7 +754,7 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m, int *old
         mutt_monitor_add(NULL);
 #endif
       if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-        update_index(menu, Context, check, *oldcount, curr_msgid);
+        update_index(menu, Context, check, *oldcount, curr);
 
       FREE(&new_last_folder);
       OptSearchInvalid = true;
@@ -771,12 +823,12 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m, int *old
  * @param buf        Folder to change to
  * @param buflen     Length of buffer
  * @param oldcount   How many items are currently in the index
- * @param curr_msgid Remember our place in the index
+ * @param curr       Remember our place in the index
  * @param read_only  Open Mailbox in read-only mode
  */
 static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf,
                                              int buflen, int *oldcount,
-                                             const char *curr_msgid, bool read_only)
+                                             const struct SelectedEmail *curr, bool read_only)
 {
   if (!nm_url_from_query(NULL, buf, buflen))
   {
@@ -785,7 +837,7 @@ static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf,
   }
 
   struct Mailbox *m_query = mx_path_resolve(buf);
-  change_folder_mailbox(menu, m_query, oldcount, curr_msgid, read_only);
+  change_folder_mailbox(menu, m_query, oldcount, curr, read_only);
   return m_query;
 }
 #endif
@@ -796,12 +848,12 @@ static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf,
  * @param buf        Folder to change to
  * @param buflen     Length of buffer
  * @param oldcount   How many items are currently in the index
- * @param curr_msgid Remember our place in the index
+ * @param curr       Remember our place in the index
  * @param pager_return Return to the pager afterwards
  * @param read_only  Open Mailbox in read-only mode
  */
 static void change_folder_string(struct Menu *menu, char *buf, size_t buflen,
-                                 int *oldcount, const char *curr_msgid,
+                                 int *oldcount, const struct SelectedEmail *curr,
                                  bool *pager_return, bool read_only)
 {
 #ifdef USE_NNTP
@@ -823,7 +875,7 @@ static void change_folder_string(struct Menu *menu, char *buf, size_t buflen,
     struct Mailbox *m = mailbox_find_name(buf);
     if (m)
     {
-      change_folder_mailbox(menu, m, oldcount, curr_msgid, read_only);
+      change_folder_mailbox(menu, m, oldcount, curr, read_only);
       *pager_return = false;
     }
     else
@@ -835,7 +887,7 @@ static void change_folder_string(struct Menu *menu, char *buf, size_t buflen,
   *pager_return = false;
 
   struct Mailbox *m = mx_path_resolve(buf);
-  change_folder_mailbox(menu, m, oldcount, curr_msgid, read_only);
+  change_folder_mailbox(menu, m, oldcount, curr, read_only);
 }
 
 /**
@@ -1137,7 +1189,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
   bool tag = false;  /* has the tag-prefix command been pressed? */
   int newcount = -1;
   int oldcount = -1;
-  char *curr_msgid = NULL; /* used to restore cursor position */
+  struct SelectedEmail curr = { 0 };
   bool do_mailbox_notify = true;
   int close = 0; /* did we OP_QUIT or OP_EXIT out of this menu? */
   int attach_msg = OptAttachMsg;
@@ -1219,7 +1271,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
        * modified underneath us.) */
 
       struct Email *e_cur = get_cur_email(Context, menu);
-      mutt_str_replace(&curr_msgid, e_cur ? e_cur->env->message_id : NULL);
+      set_current_email(&curr, e_cur);
 
       int check = mx_mbox_check(Context->mailbox);
       if (check < 0)
@@ -1272,7 +1324,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         {
           bool verbose = Context->mailbox->verbose;
           Context->mailbox->verbose = false;
-          update_index(menu, Context, check, oldcount, curr_msgid);
+          update_index(menu, Context, check, oldcount, &curr);
           Context->mailbox->verbose = verbose;
           menu->max = Context->mailbox->vcount;
         }
@@ -1861,7 +1913,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           else
           {
             if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-              update_index(menu, Context, check, oldcount, curr_msgid);
+              update_index(menu, Context, check, oldcount, &curr);
 
             menu->redraw = REDRAW_FULL; /* new mail arrived? */
             OptSearchInvalid = true;
@@ -2009,7 +2061,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           if (check != 0)
           {
             if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-              update_index(menu, Context, check, oldcount, curr_msgid);
+              update_index(menu, Context, check, oldcount, &curr);
             OptSearchInvalid = true;
             menu->redraw = REDRAW_FULL;
             break;
@@ -2068,7 +2120,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
             OptSearchInvalid = true;
           }
           else if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-            update_index(menu, Context, check, oc, curr_msgid);
+            update_index(menu, Context, check, oc, &curr);
 
           /* do a sanity check even if mx_mbox_sync failed.  */
 
@@ -2144,7 +2196,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           if (buf[strlen(buf) - 1] == '>')
             buf[strlen(buf) - 1] = '\0';
 
-          change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
+          change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &curr, false);
 
           // If notmuch doesn't contain the message, we're left in an empty
           // vfolder. No messages are found, but nm_read_entire_thread assumes
@@ -2318,7 +2370,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         char *query_unencoded = mutt_str_dup(buf);
 
         struct Mailbox *m_query =
-            change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid,
+            change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &curr,
                                   (op == OP_MAIN_VFOLDER_FROM_QUERY_READONLY));
         if (m_query)
         {
@@ -2349,7 +2401,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         }
         nm_query_window_backward();
         mutt_str_copy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
-        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
+        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &curr, false);
         break;
       }
 
@@ -2369,14 +2421,14 @@ int mutt_index_menu(struct MuttWindow *dlg)
         }
         nm_query_window_forward();
         mutt_str_copy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
-        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
+        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &curr, false);
         break;
       }
 #endif
 
 #ifdef USE_SIDEBAR
       case OP_SIDEBAR_OPEN:
-        change_folder_mailbox(menu, sb_get_highlight(), &oldcount, curr_msgid, false);
+        change_folder_mailbox(menu, sb_get_highlight(), &oldcount, &curr, false);
         break;
 #endif
 
@@ -2398,7 +2450,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           break;
         }
 
-        change_folder_mailbox(menu, m, &oldcount, curr_msgid, false);
+        change_folder_mailbox(menu, m, &oldcount, &curr, false);
         break;
       }
 
@@ -2449,13 +2501,13 @@ int mutt_index_menu(struct MuttWindow *dlg)
         struct Mailbox *m = mx_mbox_find2(mutt_b2s(folderbuf));
         if (m)
         {
-          change_folder_mailbox(menu, m, &oldcount, curr_msgid, read_only);
+          change_folder_mailbox(menu, m, &oldcount, &curr, read_only);
           pager_return = false;
         }
         else
         {
           change_folder_string(menu, folderbuf->data, folderbuf->dsize,
-                               &oldcount, curr_msgid, &pager_return, read_only);
+                               &oldcount, &curr, &pager_return, read_only);
         }
 
       changefoldercleanup:
@@ -2521,13 +2573,13 @@ int mutt_index_menu(struct MuttWindow *dlg)
         struct Mailbox *m = mx_mbox_find2(mutt_b2s(folderbuf));
         if (m)
         {
-          change_folder_mailbox(menu, m, &oldcount, curr_msgid, read_only);
+          change_folder_mailbox(menu, m, &oldcount, &curr, read_only);
           pager_return = false;
         }
         else
         {
           change_folder_string(menu, folderbuf->data, folderbuf->dsize,
-                               &oldcount, curr_msgid, &pager_return, read_only);
+                               &oldcount, &curr, &pager_return, read_only);
         }
         menu->help = mutt_compile_help(helpstr, sizeof(helpstr), MENU_MAIN, IndexNewsHelp);
 
@@ -2575,7 +2627,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         e_cur = get_cur_email(Context, menu);
         if (!e_cur)
           break;
-        mutt_str_replace(&curr_msgid, e_cur->env->message_id);
+        set_current_email(&curr, e_cur);
 
         op = mutt_display_message(win_index, win_ibar, win_pager, win_pbar,
                                   Context->mailbox, e_cur);
@@ -2591,7 +2643,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         in_pager = true;
         menu->oldcurrent = menu->current;
         if (Context && Context->mailbox)
-          update_index(menu, Context, MUTT_NEW_MAIL, Context->mailbox->msg_count, curr_msgid);
+          update_index(menu, Context, MUTT_NEW_MAIL, Context->mailbox->msg_count, &curr);
         continue;
       }
 
@@ -3974,7 +4026,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
 
   mutt_menu_pop_current(menu);
   mutt_menu_free(&menu);
-  FREE(&curr_msgid);
+  FREE(&curr.message_id);
   return close;
 }
 
