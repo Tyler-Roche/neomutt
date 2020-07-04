@@ -62,9 +62,9 @@ struct Body
 
   struct Envelope *mime_headers;  ///< Memory hole protected headers
 
-  unsigned int type : 4;          ///< content-type primary type
-  unsigned int encoding : 3;      ///< content-transfer-encoding
-  unsigned int disposition : 2;   ///< content-disposition
+  unsigned int type : 4;          ///< content-type primary type, #ContentType
+  unsigned int encoding : 3;      ///< content-transfer-encoding, #ContentEncoding
+  unsigned int disposition : 2;   ///< content-disposition, #ContentDisposition
   bool use_disp : 1;              ///< Content-Disposition uses filename= ?
   bool unlink : 1;                ///< If true, `filename` should be unlink()ed before free()ing this structure
   bool tagged : 1;                ///< This attachment is tagged
@@ -85,6 +85,7 @@ struct Body
 
 bool         mutt_body_cmp_strict(const struct Body *b1, const struct Body *b2);
 void         mutt_body_free      (struct Body **ptr);
+char *       mutt_body_get_charset(struct Body *b, char *buf, size_t buflen);
 struct Body *mutt_body_new       (void);
 
 #endif /* MUTT_EMAIL_BODY_H */

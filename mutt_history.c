@@ -36,8 +36,8 @@
 #include "mutt.h"
 #include "mutt_history.h"
 #include "format_flags.h"
-#include "globals.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_menu.h"
 #include "muttlib.h"
 #include "opcodes.h"
@@ -104,19 +104,14 @@ static void history_menu(char *buf, size_t buflen, char **matches, int match_cou
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_HISTORY, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
 
   struct MuttWindow *index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  index->notify = notify_new();
-  notify_set_parent(index->notify, dlg->notify);
 
   struct MuttWindow *ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  ibar->notify = notify_new();
-  notify_set_parent(ibar->notify, dlg->notify);
 
   if (C_StatusOnTop)
   {
@@ -150,7 +145,7 @@ static void history_menu(char *buf, size_t buflen, char **matches, int match_cou
     switch (mutt_menu_loop(menu))
     {
       case OP_GENERIC_SELECT_ENTRY:
-        mutt_str_strfcpy(buf, matches[menu->current], buflen);
+        mutt_str_copy(buf, matches[menu->current], buflen);
         /* fall through */
 
       case OP_EXIT:
@@ -178,7 +173,7 @@ void mutt_hist_complete(char *buf, size_t buflen, enum HistoryClass hclass)
   if (match_count)
   {
     if (match_count == 1)
-      mutt_str_strfcpy(buf, matches[0], buflen);
+      mutt_str_copy(buf, matches[0], buflen);
     else
       history_menu(buf, buflen, matches, match_count);
   }
@@ -197,7 +192,7 @@ int mutt_hist_observer(struct NotifyCallback *nc)
 
   struct EventConfig *ec = nc->event_data;
 
-  if (mutt_str_strcmp(ec->name, "history") != 0)
+  if (!mutt_str_equal(ec->name, "history"))
     return 0;
 
   mutt_hist_init();

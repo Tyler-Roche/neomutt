@@ -73,6 +73,7 @@ typedef uint8_t ImapCmdFlags;          ///< Flags for imap_exec(), e.g. #IMAP_CM
 #define IMAP_CMD_PASS        (1 << 0)  ///< Command contains a password. Suppress logging
 #define IMAP_CMD_QUEUE       (1 << 1)  ///< Queue a command, do not execute
 #define IMAP_CMD_POLL        (1 << 2)  ///< Poll the tcp connection before running the imap command
+#define IMAP_CMD_SINGLE      (1 << 3)  ///< Run a single command
 
 /**
  * enum ImapExecResult - imap_exec return code
@@ -169,7 +170,7 @@ struct ImapAccountData
 {
   struct Connection *conn;
   bool recovering;
-  bool closing; /* If true, we are waiting for CLOSE completion */
+  bool closing; ///< If true, we are waiting for CLOSE completion
   unsigned char state;  ///< ImapState, e.g. #IMAP_AUTHENTICATED
   unsigned char status; ///< ImapFlags, e.g. #IMAP_FATAL
   /* let me explain capstr: SASL needs the capability string (not bits).
@@ -182,17 +183,16 @@ struct ImapAccountData
    * it's just no fun to get the same information twice */
   char *capstr;
   ImapCapFlags capabilities;
-  unsigned char seqid; /* tag sequence prefix */
+  unsigned char seqid; ///< tag sequence prefix
   unsigned int seqno; ///< tag sequence number, e.g. '{seqid}0001'
   time_t lastread; ///< last time we read a command for the server
   char *buf;
   size_t blen;
 
-  bool unicode; /* If true, we can send UTF-8, and the server will use UTF8 rather than mUTF7 */
-  bool qresync; /* true, if QRESYNC is successfully ENABLE'd */
+  bool unicode; ///< If true, we can send UTF-8, and the server will use UTF8 rather than mUTF7
+  bool qresync; ///< true, if QRESYNC is successfully ENABLE'd
 
-  /* if set, the response parser will store results for complicated commands
-   * here. */
+  // if set, the response parser will store results for complicated commands here
   struct ImapList *cmdresult;
 
   /* command queue */
@@ -203,9 +203,9 @@ struct ImapAccountData
   struct Buffer cmdbuf;
 
   char delim;
-  struct Mailbox *mailbox;     /* Current selected mailbox */
-  struct Mailbox *prev_mailbox;/* Previously selected mailbox */
-  struct Account *account;     ///< Parent Account
+  struct Mailbox *mailbox;      ///< Current selected mailbox
+  struct Mailbox *prev_mailbox; ///< Previously selected mailbox
+  struct Account *account;      ///< Parent Account
 };
 
 /**
@@ -302,7 +302,7 @@ int imap_msg_save_hcache(struct Mailbox *m, struct Email *e);
 struct ImapAccountData *imap_adata_get(struct Mailbox *m);
 struct ImapMboxData *imap_mdata_get(struct Mailbox *m);
 #ifdef USE_HCACHE
-header_cache_t *imap_hcache_open(struct ImapAccountData *adata, struct ImapMboxData *mdata);
+void imap_hcache_open(struct ImapAccountData *adata, struct ImapMboxData *mdata);
 void imap_hcache_close(struct ImapMboxData *mdata);
 struct Email *imap_hcache_get(struct ImapMboxData *mdata, unsigned int uid);
 int imap_hcache_put(struct ImapMboxData *mdata, struct Email *e);

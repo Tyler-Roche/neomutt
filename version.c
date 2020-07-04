@@ -121,7 +121,7 @@ static const char *Notice =
 struct CompileOptions
 {
   const char *name;
-  int enabled; // 0 Disabled, 1 Enabled, 2 Devel only
+  int enabled; ///< 0 Disabled, 1 Enabled, 2 Devel only
 };
 
 /* These are sorted by the display string */
@@ -568,14 +568,14 @@ bool feature_enabled(const char *name)
     return false;
   for (int i = 0; comp_opts_default[i].name; i++)
   {
-    if (mutt_str_strcmp(name, comp_opts_default[i].name) == 0)
+    if (mutt_str_equal(name, comp_opts_default[i].name))
     {
       return true;
     }
   }
   for (int i = 0; comp_opts[i].name; i++)
   {
-    if (mutt_str_strcmp(name, comp_opts[i].name) == 0)
+    if (mutt_str_equal(name, comp_opts[i].name))
     {
       return comp_opts[i].enabled;
     }

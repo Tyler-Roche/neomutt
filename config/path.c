@@ -23,7 +23,12 @@
 /**
  * @page config_path Type: Path
  *
- * Type representing a path.
+ * Config type representing a path.
+ *
+ * - Backed by `char *`
+ * - Empty path is stored as `NULL`
+ * - Validator is passed `char *`, which may be `NULL`
+ * - Data is freed when `ConfigSet` is freed
  */
 
 #include "config.h"
@@ -54,12 +59,12 @@ static char *path_tidy(const char *path, bool is_dir)
     return NULL;
 
   char buf[PATH_MAX] = { 0 };
-  mutt_str_strfcpy(buf, path, sizeof(buf));
+  mutt_str_copy(buf, path, sizeof(buf));
 
   mutt_path_tilde(buf, sizeof(buf), HomeDir);
   mutt_path_tidy(buf, is_dir);
 
-  return mutt_str_strdup(buf);
+  return mutt_str_dup(buf);
 }
 
 /**
@@ -75,7 +80,7 @@ static void path_destroy(const struct ConfigSet *cs, void *var, const struct Con
 }
 
 /**
- * path_string_set - Set a Path by path - Implements ConfigSetType::string_set()
+ * path_string_set - Set a Path by string - Implements ConfigSetType::string_set()
  */
 static int path_string_set(const struct ConfigSet *cs, void *var, struct ConfigDef *cdef,
                            const char *value, struct Buffer *err)
@@ -94,7 +99,7 @@ static int path_string_set(const struct ConfigSet *cs, void *var, struct ConfigD
 
   if (var)
   {
-    if (mutt_str_strcmp(value, (*(char **) var)) == 0)
+    if (mutt_str_equal(value, (*(char **) var)))
       return CSR_SUCCESS | CSR_SUC_NO_CHANGE;
 
     if (cdef->validator)
@@ -119,14 +124,14 @@ static int path_string_set(const struct ConfigSet *cs, void *var, struct ConfigD
       FREE(&cdef->initial);
 
     cdef->type |= DT_INITIAL_SET;
-    cdef->initial = IP mutt_str_strdup(value);
+    cdef->initial = IP mutt_str_dup(value);
   }
 
   return rc;
 }
 
 /**
- * path_string_get - Get a Path as a path - Implements ConfigSetType::string_get()
+ * path_string_get - Get a Path as a string - Implements ConfigSetType::string_get()
  */
 static int path_string_get(const struct ConfigSet *cs, void *var,
                            const struct ConfigDef *cdef, struct Buffer *result)
@@ -146,7 +151,7 @@ static int path_string_get(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * path_native_set - Set a Path config item by path - Implements ConfigSetType::native_set()
+ * path_native_set - Set a Path config item by string - Implements ConfigSetType::native_set()
  */
 static int path_native_set(const struct ConfigSet *cs, void *var,
                            const struct ConfigDef *cdef, intptr_t value, struct Buffer *err)
@@ -163,7 +168,7 @@ static int path_native_set(const struct ConfigSet *cs, void *var,
     return CSR_ERR_INVALID | CSR_INV_VALIDATOR;
   }
 
-  if (mutt_str_strcmp((const char *) value, (*(char **) var)) == 0)
+  if (mutt_str_equal((const char *) value, (*(char **) var)))
     return CSR_SUCCESS | CSR_SUC_NO_CHANGE;
 
   int rc;
@@ -188,7 +193,7 @@ static int path_native_set(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * path_native_get - Get a path from a Path config item - Implements ConfigSetType::native_get()
+ * path_native_get - Get a string from a Path config item - Implements ConfigSetType::native_get()
  */
 static intptr_t path_native_get(const struct ConfigSet *cs, void *var,
                                 const struct ConfigDef *cdef, struct Buffer *err)
@@ -210,7 +215,7 @@ static int path_reset(const struct ConfigSet *cs, void *var,
   if (!str)
     rc |= CSR_SUC_EMPTY;
 
-  if (mutt_str_strcmp(str, (*(char **) var)) == 0)
+  if (mutt_str_equal(str, (*(char **) var)))
   {
     FREE(&str);
     return rc | CSR_SUC_NO_CHANGE;

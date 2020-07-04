@@ -35,13 +35,16 @@
 #include <gdbm.h>
 #include "mutt/lib.h"
 #include "lib.h"
-#include "globals.h"
+#include "mutt_globals.h"
 
 /**
  * store_gdbm_open - Implements StoreOps::open()
  */
 static void *store_gdbm_open(const char *path)
 {
+  if (!path)
+    return NULL;
+
   const int pagesize = 4096;
 
   GDBM_FILE db = gdbm_open((char *) path, pagesize, GDBM_WRCREAT, 00600, NULL);

@@ -37,9 +37,10 @@
 #include <unistd.h>
 #include "private.h"
 #include "mutt/lib.h"
-#include "conn_globals.h"
 #include "connaccount.h"
 #include "connection.h"
+#include "globals.h"
+#include "mutt_globals.h"
 
 /**
  * struct TunnelSockData - A network tunnel (pair of sockets)
@@ -236,4 +237,8 @@ void mutt_tunnel_socket_setup(struct Connection *conn)
   conn->read = tunnel_socket_read;
   conn->write = tunnel_socket_write;
   conn->poll = tunnel_socket_poll;
+  /* Note we are using ssf as a boolean in this case.  See the notes in
+   * conn/connection.h */
+  if (C_TunnelIsSecure)
+    conn->ssf = 1;
 }

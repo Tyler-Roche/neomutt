@@ -35,9 +35,10 @@
 #include "private.h"
 #include "mutt/lib.h"
 #include "socket.h"
-#include "conn_globals.h"
 #include "connaccount.h"
 #include "connection.h"
+#include "globals.h"
+#include "mutt_globals.h"
 #include "protos.h"
 #include "ssl.h"
 
@@ -300,4 +301,24 @@ struct Connection *mutt_socket_new(enum ConnectionType type)
   }
 
   return conn;
+}
+
+/**
+ * mutt_socket_empty - Clear out any queued data
+ *
+ * The internal buffer is emptied and any data that has already arrived at this
+ * machine (in kernel buffers) is read and dropped.
+ */
+void mutt_socket_empty(struct Connection *conn)
+{
+  if (!conn)
+    return;
+
+  char buf[1024];
+  int bytes;
+
+  while ((bytes = mutt_socket_poll(conn, 0)) > 0)
+  {
+    mutt_socket_read(conn, buf, MIN(bytes, sizeof(buf)));
+  }
 }

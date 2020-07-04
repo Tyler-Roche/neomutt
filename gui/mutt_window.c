@@ -3,7 +3,7 @@
  * Window management
  *
  * @authors
- * Copyright (C) 2018 Richard Russon <rich@flatcap.org>
+ * Copyright (C) 2018-2020 Richard Russon <rich@flatcap.org>
  *
  * @copyright
  * This program is free software: you can redistribute it and/or modify it under
@@ -34,8 +34,8 @@
 #include "core/lib.h"
 #include "debug/lib.h"
 #include "mutt_window.h"
-#include "globals.h"
 #include "mutt_curses.h"
+#include "mutt_globals.h"
 #include "mutt_menu.h"
 #include "options.h"
 #include "reflow.h"
@@ -139,6 +139,7 @@ struct MuttWindow *mutt_window_new(enum WindowType type, enum MuttWindowOrientat
   win->req_rows = rows;
   win->req_cols = cols;
   win->state.visible = true;
+  win->notify = notify_new();
   TAILQ_INIT(&win->children);
   return win;
 }
@@ -154,12 +155,15 @@ void mutt_window_free(struct MuttWindow **ptr)
 
   struct MuttWindow *win = *ptr;
 
-  notify_free(&win->notify);
+  struct EventWindow ev_w = { win, WN_NO_FLAGS };
+  notify_send(win->notify, NT_WINDOW, NT_WINDOW_DELETE, &ev_w);
+
+  mutt_winlist_free(&win->children);
 
   if (win->wdata && win->wdata_free)
     win->wdata_free(win, &win->wdata); // Custom function to free private data
 
-  mutt_winlist_free(&win->children);
+  notify_free(&win->notify);
 
   FREE(ptr);
 }
@@ -244,13 +248,13 @@ static int mutt_dlg_rootwin_observer(struct NotifyCallback *nc)
   struct EventConfig *ec = nc->event_data;
   struct MuttWindow *root_win = nc->global_data;
 
-  if (mutt_str_strcmp(ec->name, "help") == 0)
+  if (mutt_str_equal(ec->name, "help"))
   {
     MuttHelpWindow->state.visible = C_Help;
     goto reflow;
   }
 
-  if (mutt_str_strcmp(ec->name, "status_on_top") == 0)
+  if (mutt_str_equal(ec->name, "status_on_top"))
   {
     struct MuttWindow *first = TAILQ_FIRST(&root_win->children);
     if (!first)
@@ -319,25 +323,18 @@ void mutt_window_init(void)
 
   RootWindow =
       mutt_window_new(WT_ROOT, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_FIXED, 0, 0);
-  RootWindow->notify = notify_new();
   notify_set_parent(RootWindow->notify, NeoMutt->notify);
 
   MuttHelpWindow = mutt_window_new(WT_HELP_BAR, MUTT_WIN_ORIENT_VERTICAL,
                                    MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
   MuttHelpWindow->state.visible = C_Help;
-  MuttHelpWindow->notify = notify_new();
-  notify_set_parent(MuttHelpWindow->notify, RootWindow->notify);
 
   MuttDialogWindow = mutt_window_new(WT_ALL_DIALOGS, MUTT_WIN_ORIENT_VERTICAL,
                                      MUTT_WIN_SIZE_MAXIMISE, MUTT_WIN_SIZE_UNLIMITED,
                                      MUTT_WIN_SIZE_UNLIMITED);
-  MuttDialogWindow->notify = notify_new();
-  notify_set_parent(MuttDialogWindow->notify, RootWindow->notify);
 
   MuttMessageWindow = mutt_window_new(WT_MESSAGE, MUTT_WIN_ORIENT_VERTICAL,
                                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  MuttMessageWindow->notify = notify_new();
-  notify_set_parent(MuttMessageWindow->notify, RootWindow->notify);
 
   if (C_StatusOnTop)
   {
@@ -568,6 +565,32 @@ void mutt_window_add_child(struct MuttWindow *parent, struct MuttWindow *child)
 
   TAILQ_INSERT_TAIL(&parent->children, child, entries);
   child->parent = parent;
+
+  notify_set_parent(child->notify, parent->notify);
+
+  struct EventWindow ev_w = { child, WN_NO_FLAGS };
+  notify_send(child->notify, NT_WINDOW, NT_WINDOW_NEW, &ev_w);
+}
+
+/**
+ * mutt_window_remove_child - Remove a child from a Window
+ * @param parent Window to remove from
+ * @param child  Window to remove
+ */
+struct MuttWindow *mutt_window_remove_child(struct MuttWindow *parent, struct MuttWindow *child)
+{
+  if (!parent || !child)
+    return NULL;
+
+  struct EventWindow ev_w = { child, WN_NO_FLAGS };
+  notify_send(child->notify, NT_WINDOW, NT_WINDOW_DELETE, &ev_w);
+
+  TAILQ_REMOVE(&parent->children, child, entries);
+  child->parent = NULL;
+
+  notify_set_parent(child->notify, NULL);
+
+  return child;
 }
 
 /**
@@ -705,6 +728,11 @@ void dialog_push(struct MuttWindow *dlg)
 
   TAILQ_INSERT_TAIL(&MuttDialogWindow->children, dlg, entries);
   notify_set_parent(dlg->notify, MuttDialogWindow->notify);
+
+  // Notify the world, allowing plugins to integrate
+  struct EventWindow ev_w = { dlg, WN_VISIBLE };
+  notify_send(dlg->notify, NT_WINDOW, NT_WINDOW_DIALOG, &ev_w);
+
   dlg->state.visible = true;
   dlg->parent = MuttDialogWindow;
   mutt_window_reflow(MuttDialogWindow);
@@ -728,6 +756,10 @@ void dialog_pop(void)
   if (!last)
     return;
 
+  // Notify the world, allowing plugins to clean up
+  struct EventWindow ev_w = { last, WN_HIDDEN };
+  notify_send(last->notify, NT_WINDOW, NT_WINDOW_DIALOG, &ev_w);
+
   last->state.visible = false;
   last->parent = NULL;
   TAILQ_REMOVE(&MuttDialogWindow->children, last, entries);
@@ -738,7 +770,64 @@ void dialog_pop(void)
     last->state.visible = true;
     mutt_window_reflow(MuttDialogWindow);
   }
+  mutt_menu_set_current_redraw(REDRAW_FULL);
 #ifdef USE_DEBUG_WINDOW
   debug_win_dump();
 #endif
+}
+
+/**
+ * window_recalc - Recalculate a tree of Windows
+ * @param win Window to start at
+ */
+void window_recalc(struct MuttWindow *win)
+{
+  if (!win)
+    return;
+
+  if (win->recalc)
+    win->recalc(win, false);
+
+  struct MuttWindow *np = NULL;
+  TAILQ_FOREACH(np, &win->children, entries)
+  {
+    if (np->recalc)
+      np->recalc(np, false);
+  }
+}
+
+/**
+ * window_repaint - Repaint a tree of Windows
+ * @param win Window to start at
+ */
+void window_repaint(struct MuttWindow *win)
+{
+  if (!win)
+    return;
+
+  if (win->repaint)
+    win->repaint(win, false);
+
+  struct MuttWindow *np = NULL;
+  TAILQ_FOREACH(np, &win->children, entries)
+  {
+    if (np->repaint)
+      np->repaint(np, false);
+  }
+}
+
+/**
+ * window_redraw - Reflow, recalc and repaint a tree of Windows
+ * @param win Window to start at
+ */
+void window_redraw(struct MuttWindow *win)
+{
+  if (!win)
+    return;
+
+  window_reflow(win);
+  window_notify_all(win);
+
+  window_recalc(win);
+  window_repaint(win);
 }

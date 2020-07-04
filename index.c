@@ -48,11 +48,11 @@
 #include "commands.h"
 #include "context.h"
 #include "format_flags.h"
-#include "globals.h"
 #include "hdrline.h"
 #include "hook.h"
 #include "init.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_header.h"
 #include "mutt_logging.h"
 #include "mutt_mailbox.h"
@@ -68,10 +68,10 @@
 #include "protos.h"
 #include "recvattach.h"
 #include "score.h"
-#include "send.h"
 #include "sort.h"
 #include "status.h"
 #include "ncrypt/lib.h"
+#include "send/lib.h"
 #ifdef USE_SIDEBAR
 #include "sidebar.h"
 #endif
@@ -608,21 +608,13 @@ static void update_index_unthreaded(struct Context *ctx, int check, int oldcount
  * @param ctx        Mailbox
  * @param check      Flags, e.g. #MUTT_REOPENED
  * @param oldcount   How many items are currently in the index
- * @param index_hint Remember our place in the index
+ * @param curr_msgid Remember our place in the index
  */
-void update_index(struct Menu *menu, struct Context *ctx, int check, int oldcount, int index_hint)
+void update_index(struct Menu *menu, struct Context *ctx, int check,
+                  int oldcount, const char *curr_msgid)
 {
   if (!menu || !ctx)
     return;
-
-  /* take note of the current message */
-  if (oldcount)
-  {
-    if (menu->current < ctx->mailbox->vcount)
-      menu->oldcurrent = index_hint;
-    else
-      oldcount = 0; /* invalid message number! */
-  }
 
   if ((C_Sort & SORT_MASK) == SORT_THREADS)
     update_index_threaded(ctx, check, oldcount);
@@ -638,7 +630,7 @@ void update_index(struct Menu *menu, struct Context *ctx, int check, int oldcoun
       struct Email *e = mutt_get_virt_email(ctx->mailbox, i);
       if (!e)
         continue;
-      if (e->index == menu->oldcurrent)
+      if (mutt_str_equal(e->env->message_id, curr_msgid))
       {
         menu->current = i;
         break;
@@ -675,11 +667,11 @@ static int mailbox_index_observer(struct NotifyCallback *nc)
  * @param menu       Current Menu
  * @param m          Mailbox
  * @param oldcount   How many items are currently in the index
- * @param index_hint Remember our place in the index
+ * @param curr_msgid Remember our place in the index
  * @param read_only  Open Mailbox in read-only mode
  */
-static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m,
-                                  int *oldcount, int *index_hint, bool read_only)
+static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m, int *oldcount,
+                                  const char *curr_msgid, bool read_only)
 {
   if (!m)
     return;
@@ -696,10 +688,10 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m,
 #endif
 #ifdef USE_COMP_MBOX
     if (Context->mailbox->compress_info && (Context->mailbox->realpath[0] != '\0'))
-      new_last_folder = mutt_str_strdup(Context->mailbox->realpath);
+      new_last_folder = mutt_str_dup(Context->mailbox->realpath);
     else
 #endif
-      new_last_folder = mutt_str_strdup(mailbox_path(Context->mailbox));
+      new_last_folder = mutt_str_dup(mailbox_path(Context->mailbox));
     *oldcount = Context->mailbox->msg_count;
 
     int check = mx_mbox_close(&Context);
@@ -710,7 +702,7 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m,
         mutt_monitor_add(NULL);
 #endif
       if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-        update_index(menu, Context, check, *oldcount, *index_hint);
+        update_index(menu, Context, check, *oldcount, curr_msgid);
 
       FREE(&new_last_folder);
       OptSearchInvalid = true;
@@ -726,14 +718,24 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m,
    * could be deleted, leaving `m` dangling. */
   // TODO: Refactor this function to avoid the need for an observer
   notify_observer_add(m->notify, mailbox_index_observer, &m);
+  char *dup_path = mutt_str_dup(mailbox_path(m));
 
   mutt_folder_hook(mailbox_path(m), m ? m->name : NULL);
+  if (m)
+  {
+    /* `m` is still valid, but we won't need the observer again before the end
+     * of the function. */
+    notify_observer_remove(m->notify, mailbox_index_observer, &m);
+  }
+  else
+  {
+    // Recreate the Mailbox (probably because a hook has done `unmailboxes *`)
+    m = mx_path_resolve(dup_path);
+  }
+  FREE(&dup_path);
+
   if (!m)
     return;
-
-  /* `m` is still valid, but we won't need the observer again before the end
-   * of the function. */
-  notify_observer_remove(m->notify, mailbox_index_observer, &m);
 
   const int flags = read_only ? MUTT_READONLY : MUTT_OPEN_NO_FLAGS;
   Context = mx_mbox_open(m, flags);
@@ -769,11 +771,12 @@ static void change_folder_mailbox(struct Menu *menu, struct Mailbox *m,
  * @param buf        Folder to change to
  * @param buflen     Length of buffer
  * @param oldcount   How many items are currently in the index
- * @param index_hint Remember our place in the index
+ * @param curr_msgid Remember our place in the index
  * @param read_only  Open Mailbox in read-only mode
  */
-static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf, int buflen,
-                                             int *oldcount, int *index_hint, bool read_only)
+static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf,
+                                             int buflen, int *oldcount,
+                                             const char *curr_msgid, bool read_only)
 {
   if (!nm_url_from_query(NULL, buf, buflen))
   {
@@ -782,7 +785,7 @@ static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf, int b
   }
 
   struct Mailbox *m_query = mx_path_resolve(buf);
-  change_folder_mailbox(menu, m_query, oldcount, index_hint, read_only);
+  change_folder_mailbox(menu, m_query, oldcount, curr_msgid, read_only);
   return m_query;
 }
 #endif
@@ -793,12 +796,13 @@ static struct Mailbox *change_folder_notmuch(struct Menu *menu, char *buf, int b
  * @param buf        Folder to change to
  * @param buflen     Length of buffer
  * @param oldcount   How many items are currently in the index
- * @param index_hint Remember our place in the index
+ * @param curr_msgid Remember our place in the index
  * @param pager_return Return to the pager afterwards
  * @param read_only  Open Mailbox in read-only mode
  */
-static void change_folder_string(struct Menu *menu, char *buf, size_t buflen, int *oldcount,
-                                 int *index_hint, bool *pager_return, bool read_only)
+static void change_folder_string(struct Menu *menu, char *buf, size_t buflen,
+                                 int *oldcount, const char *curr_msgid,
+                                 bool *pager_return, bool read_only)
 {
 #ifdef USE_NNTP
   if (OptNews)
@@ -819,7 +823,7 @@ static void change_folder_string(struct Menu *menu, char *buf, size_t buflen, in
     struct Mailbox *m = mailbox_find_name(buf);
     if (m)
     {
-      change_folder_mailbox(menu, m, oldcount, index_hint, read_only);
+      change_folder_mailbox(menu, m, oldcount, curr_msgid, read_only);
       *pager_return = false;
     }
     else
@@ -831,7 +835,7 @@ static void change_folder_string(struct Menu *menu, char *buf, size_t buflen, in
   *pager_return = false;
 
   struct Mailbox *m = mx_path_resolve(buf);
-  change_folder_mailbox(menu, m, oldcount, index_hint, read_only);
+  change_folder_mailbox(menu, m, oldcount, curr_msgid, read_only);
 }
 
 /**
@@ -1133,7 +1137,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
   bool tag = false;  /* has the tag-prefix command been pressed? */
   int newcount = -1;
   int oldcount = -1;
-  int index_hint = 0; /* used to restore cursor position */
+  char *curr_msgid = NULL; /* used to restore cursor position */
   bool do_mailbox_notify = true;
   int close = 0; /* did we OP_QUIT or OP_EXIT out of this menu? */
   int attach_msg = OptAttachMsg;
@@ -1215,9 +1219,9 @@ int mutt_index_menu(struct MuttWindow *dlg)
        * modified underneath us.) */
 
       struct Email *e_cur = get_cur_email(Context, menu);
-      index_hint = e_cur ? e_cur->index : 0;
+      mutt_str_replace(&curr_msgid, e_cur ? e_cur->env->message_id : NULL);
 
-      int check = mx_mbox_check(Context->mailbox, &index_hint);
+      int check = mx_mbox_check(Context->mailbox);
       if (check < 0)
       {
         if (!Context->mailbox || (mutt_buffer_is_empty(&Context->mailbox->pathbuf)))
@@ -1268,7 +1272,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         {
           bool verbose = Context->mailbox->verbose;
           Context->mailbox->verbose = false;
-          update_index(menu, Context, check, oldcount, index_hint);
+          update_index(menu, Context, check, oldcount, curr_msgid);
           Context->mailbox->verbose = verbose;
           menu->max = Context->mailbox->vcount;
         }
@@ -1507,7 +1511,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
               mutt_error(_("Article has no parent reference"));
               break;
             }
-            mutt_str_strfcpy(buf, STAILQ_FIRST(&e_cur->env->references)->data, sizeof(buf));
+            mutt_str_copy(buf, STAILQ_FIRST(&e_cur->env->references)->data, sizeof(buf));
           }
           if (!Context->mailbox->id_hash)
             Context->mailbox->id_hash = mutt_make_id_hash(Context->mailbox);
@@ -1574,7 +1578,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         mutt_message(_("Fetching message headers..."));
         if (!Context->mailbox->id_hash)
           Context->mailbox->id_hash = mutt_make_id_hash(Context->mailbox);
-        mutt_str_strfcpy(buf, e_cur->env->message_id, sizeof(buf));
+        mutt_str_copy(buf, e_cur->env->message_id, sizeof(buf));
 
         /* trying to find msgid of the root message */
         if (op == OP_RECONSTRUCT_THREAD)
@@ -1591,7 +1595,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
 
             /* the last msgid in References is the root message */
             if (!STAILQ_NEXT(ref, entries))
-              mutt_str_strfcpy(buf, ref->data, sizeof(buf));
+              mutt_str_copy(buf, ref->data, sizeof(buf));
           }
         }
 
@@ -1783,19 +1787,19 @@ int mutt_index_menu(struct MuttWindow *dlg)
         {
           char buf2[1024];
 
-          if (!Context->pattern || (strncmp(Context->pattern, "!~R!~D~s", 8) != 0))
+          if (!Context->pattern || !mutt_strn_equal(Context->pattern, "!~R!~D~s", 8))
           {
             snprintf(buf2, sizeof(buf2), "!~R!~D~s%s",
                      Context->pattern ? Context->pattern : ".*");
           }
           else
           {
-            mutt_str_strfcpy(buf2, Context->pattern + 8, sizeof(buf2));
-            if ((*buf2 == '\0') || (strncmp(buf2, ".*", 2) == 0))
+            mutt_str_copy(buf2, Context->pattern + 8, sizeof(buf2));
+            if ((*buf2 == '\0') || mutt_strn_equal(buf2, ".*", 2))
               snprintf(buf2, sizeof(buf2), "~A");
           }
           FREE(&Context->pattern);
-          Context->pattern = mutt_str_strdup(buf2);
+          Context->pattern = mutt_str_dup(buf2);
           mutt_pattern_func(MUTT_LIMIT, NULL);
         }
 
@@ -1860,7 +1864,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           else
           {
             if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-              update_index(menu, Context, check, oldcount, index_hint);
+              update_index(menu, Context, check, oldcount, curr_msgid);
 
             menu->redraw = REDRAW_FULL; /* new mail arrived? */
             OptSearchInvalid = true;
@@ -1935,12 +1939,6 @@ int mutt_index_menu(struct MuttWindow *dlg)
             break;
           mutt_set_flag(Context->mailbox, e_cur, MUTT_TAG, !e_cur->tagged);
 
-          Context->last_tag = e_cur->tagged ?
-                                  e_cur :
-                                  (((Context->last_tag == e_cur) && !e_cur->tagged) ?
-                                       NULL :
-                                       Context->last_tag);
-
           menu->redraw |= REDRAW_STATUS;
           if (C_Resolve && (menu->current < Context->mailbox->vcount - 1))
           {
@@ -2014,7 +2012,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
           if (check != 0)
           {
             if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-              update_index(menu, Context, check, oldcount, index_hint);
+              update_index(menu, Context, check, oldcount, curr_msgid);
             OptSearchInvalid = true;
             menu->redraw = REDRAW_FULL;
             break;
@@ -2055,7 +2053,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
               e = mutt_get_virt_email(Context->mailbox, newidx);
           }
 
-          int check = mx_mbox_sync(Context->mailbox, &index_hint);
+          int check = mx_mbox_sync(Context->mailbox);
           if (check == 0)
           {
             if (e && (Context->mailbox->vcount != ovc))
@@ -2073,7 +2071,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
             OptSearchInvalid = true;
           }
           else if ((check == MUTT_NEW_MAIL) || (check == MUTT_REOPENED))
-            update_index(menu, Context, check, oc, index_hint);
+            update_index(menu, Context, check, oc, curr_msgid);
 
           /* do a sanity check even if mx_mbox_sync failed.  */
 
@@ -2145,11 +2143,11 @@ int mutt_index_menu(struct MuttWindow *dlg)
           int msg_id_offset = 0;
           if ((e_cur->env->message_id)[0] == '<')
             msg_id_offset = 1;
-          mutt_str_strcat(buf, sizeof(buf), (e_cur->env->message_id) + msg_id_offset);
+          mutt_str_cat(buf, sizeof(buf), (e_cur->env->message_id) + msg_id_offset);
           if (buf[strlen(buf) - 1] == '>')
             buf[strlen(buf) - 1] = '\0';
 
-          change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &index_hint, false);
+          change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
 
           // If notmuch doesn't contain the message, we're left in an empty
           // vfolder. No messages are found, but nm_read_entire_thread assumes
@@ -2320,10 +2318,10 @@ int mutt_index_menu(struct MuttWindow *dlg)
         }
 
         // Keep copy of user's query to name the mailbox
-        char *query_unencoded = mutt_str_strdup(buf);
+        char *query_unencoded = mutt_str_dup(buf);
 
         struct Mailbox *m_query =
-            change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &index_hint,
+            change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid,
                                   (op == OP_MAIN_VFOLDER_FROM_QUERY_READONLY));
         if (m_query)
         {
@@ -2353,8 +2351,8 @@ int mutt_index_menu(struct MuttWindow *dlg)
           break;
         }
         nm_query_window_backward();
-        mutt_str_strfcpy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
-        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &index_hint, false);
+        mutt_str_copy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
+        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
         break;
       }
 
@@ -2373,14 +2371,15 @@ int mutt_index_menu(struct MuttWindow *dlg)
           break;
         }
         nm_query_window_forward();
-        mutt_str_strfcpy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
-        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, &index_hint, false);
+        mutt_str_copy(buf, C_NmQueryWindowCurrentSearch, sizeof(buf));
+        change_folder_notmuch(menu, buf, sizeof(buf), &oldcount, curr_msgid, false);
         break;
       }
+#endif
 
 #ifdef USE_SIDEBAR
       case OP_SIDEBAR_OPEN:
-        change_folder_mailbox(menu, sb_get_highlight(), &oldcount, &index_hint, false);
+        change_folder_mailbox(menu, sb_get_highlight(), &oldcount, curr_msgid, false);
         break;
 #endif
 
@@ -2402,10 +2401,9 @@ int mutt_index_menu(struct MuttWindow *dlg)
           break;
         }
 
-        change_folder_mailbox(menu, m, &oldcount, &index_hint, false);
+        change_folder_mailbox(menu, m, &oldcount, curr_msgid, false);
         break;
       }
-#endif
 
       case OP_MAIN_CHANGE_FOLDER:
       case OP_MAIN_CHANGE_FOLDER_READONLY:
@@ -2454,13 +2452,13 @@ int mutt_index_menu(struct MuttWindow *dlg)
         struct Mailbox *m = mx_mbox_find2(mutt_b2s(folderbuf));
         if (m)
         {
-          change_folder_mailbox(menu, m, &oldcount, &index_hint, read_only);
+          change_folder_mailbox(menu, m, &oldcount, curr_msgid, read_only);
           pager_return = false;
         }
         else
         {
           change_folder_string(menu, folderbuf->data, folderbuf->dsize,
-                               &oldcount, &index_hint, &pager_return, read_only);
+                               &oldcount, curr_msgid, &pager_return, read_only);
         }
 
       changefoldercleanup:
@@ -2526,13 +2524,13 @@ int mutt_index_menu(struct MuttWindow *dlg)
         struct Mailbox *m = mx_mbox_find2(mutt_b2s(folderbuf));
         if (m)
         {
-          change_folder_mailbox(menu, m, &oldcount, &index_hint, read_only);
+          change_folder_mailbox(menu, m, &oldcount, curr_msgid, read_only);
           pager_return = false;
         }
         else
         {
           change_folder_string(menu, folderbuf->data, folderbuf->dsize,
-                               &oldcount, &index_hint, &pager_return, read_only);
+                               &oldcount, curr_msgid, &pager_return, read_only);
         }
         menu->help = mutt_compile_help(helpstr, sizeof(helpstr), MENU_MAIN, IndexNewsHelp);
 
@@ -2580,7 +2578,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         e_cur = get_cur_email(Context, menu);
         if (!e_cur)
           break;
-        int hint = e_cur->index;
+        mutt_str_replace(&curr_msgid, e_cur->env->message_id);
 
         op = mutt_display_message(win_index, win_ibar, win_pager, win_pbar,
                                   Context->mailbox, e_cur);
@@ -2596,7 +2594,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         in_pager = true;
         menu->oldcurrent = menu->current;
         if (Context && Context->mailbox)
-          update_index(menu, Context, MUTT_NEW_MAIL, Context->mailbox->msg_count, hint);
+          update_index(menu, Context, MUTT_NEW_MAIL, Context->mailbox->msg_count, curr_msgid);
         continue;
       }
 
@@ -2678,13 +2676,11 @@ int mutt_index_menu(struct MuttWindow *dlg)
           mutt_error(_("Threading is not enabled"));
         else if (!e_cur->env->message_id)
           mutt_error(_("No Message-ID: header available to link thread"));
-        else if (!tag && (!Context->last_tag || !Context->last_tag->tagged))
-          mutt_error(_("First, please tag a message to be linked here"));
         else
         {
           struct Email *e_oldcur = e_cur;
           struct EmailList el = STAILQ_HEAD_INITIALIZER(el);
-          el_add_tagged(&el, Context, Context->last_tag, tag);
+          el_add_tagged(&el, Context, NULL, true);
 
           if (mutt_link_threads(e_cur, &el, Context->mailbox))
           {
@@ -3760,7 +3756,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
         if (!e_cur)
           break;
         if ((op != OP_FOLLOWUP) || !e_cur->env->followup_to ||
-            (mutt_str_strcasecmp(e_cur->env->followup_to, "poster") != 0) ||
+            !mutt_istr_equal(e_cur->env->followup_to, "poster") ||
             (query_quadoption(C_FollowupToPoster,
                               _("Reply by mail as poster prefers?")) != MUTT_YES))
         {
@@ -3981,6 +3977,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
 
   mutt_menu_pop_current(menu);
   mutt_menu_free(&menu);
+  FREE(&curr_msgid);
   return close;
 }
 
@@ -4021,7 +4018,7 @@ int mutt_reply_observer(struct NotifyCallback *nc)
 
   struct EventConfig *ec = nc->event_data;
 
-  if (mutt_str_strcmp(ec->name, "reply_regex") != 0)
+  if (!mutt_str_equal(ec->name, "reply_regex"))
     return 0;
 
   if (!Context || !Context->mailbox)
@@ -4067,14 +4064,10 @@ static struct MuttWindow *create_panel_index(struct MuttWindow *parent, bool sta
   struct MuttWindow *win_index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  win_index->notify = notify_new();
-  notify_set_parent(win_index->notify, parent->notify);
 
   struct MuttWindow *win_ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  win_ibar->notify = notify_new();
-  notify_set_parent(win_ibar->notify, parent->notify);
 
   if (status_on_top)
   {
@@ -4107,15 +4100,11 @@ static struct MuttWindow *create_panel_pager(struct MuttWindow *parent, bool sta
       mutt_window_new(WT_PAGER, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
   win_pager->state.visible = false;
-  win_pager->notify = notify_new();
-  notify_set_parent(win_pager->notify, parent->notify);
 
   struct MuttWindow *win_pbar =
       mutt_window_new(WT_PAGER_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
   win_pbar->state.visible = false;
-  win_pbar->notify = notify_new();
-  notify_set_parent(win_pbar->notify, parent->notify);
 
   if (status_on_top)
   {
@@ -4142,8 +4131,6 @@ static struct MuttWindow *create_panel_sidebar(struct MuttWindow *parent)
       mutt_window_new(WT_SIDEBAR, MUTT_WIN_ORIENT_HORIZONTAL, MUTT_WIN_SIZE_FIXED,
                       C_SidebarWidth, MUTT_WIN_SIZE_UNLIMITED);
   win_sidebar->state.visible = C_SidebarVisible && (C_SidebarWidth > 0);
-  win_sidebar->notify = notify_new();
-  notify_set_parent(win_sidebar->notify, parent->notify);
 
   return win_sidebar;
 }
@@ -4157,7 +4144,6 @@ struct MuttWindow *index_pager_init(void)
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_INDEX, MUTT_WIN_ORIENT_HORIZONTAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
   notify_observer_add(NeoMutt->notify, mutt_dlgindex_observer, dlg);
 
   struct MuttWindow *win_sidebar = create_panel_sidebar(dlg);
@@ -4199,6 +4185,8 @@ void index_pager_shutdown(struct MuttWindow *dlg)
     return;
 
   notify_observer_remove(NeoMutt->notify, sb_observer, win_sidebar);
+
+  notify_observer_remove(NeoMutt->notify, mutt_dlgindex_observer, dlg);
 }
 
 /**
@@ -4219,7 +4207,7 @@ int mutt_dlgindex_observer(struct NotifyCallback *nc)
   if (!win_index || !win_pager)
     return -1;
 
-  if (mutt_str_strcmp(ec->name, "status_on_top") == 0)
+  if (mutt_str_equal(ec->name, "status_on_top"))
   {
     struct MuttWindow *parent = win_index->parent;
     if (!parent)
@@ -4247,7 +4235,7 @@ int mutt_dlgindex_observer(struct NotifyCallback *nc)
     goto reflow;
   }
 
-  if (mutt_str_strcmp(ec->name, "pager_index_lines") == 0)
+  if (mutt_str_equal(ec->name, "pager_index_lines"))
   {
     struct MuttWindow *parent = win_pager->parent;
     if (parent->state.visible)

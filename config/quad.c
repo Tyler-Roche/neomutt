@@ -23,7 +23,11 @@
 /**
  * @page config_quad Type: Quad-option
  *
- * Type representing a quad-option.
+ * Config type representing a quad-option.
+ *
+ * - Backed by `unsigned char`
+ * - Validator is passed `unsigned char`
+ * - Valid user entry: #QuadValues
  */
 
 #include "config.h"
@@ -57,7 +61,7 @@ static int quad_string_set(const struct ConfigSet *cs, void *var, struct ConfigD
   int num = -1;
   for (size_t i = 0; QuadValues[i]; i++)
   {
-    if (mutt_str_strcasecmp(QuadValues[i], value) == 0)
+    if (mutt_istr_equal(QuadValues[i], value))
     {
       num = i;
       break;

@@ -315,7 +315,7 @@ struct HashElem *cs_inherit_variable(const struct ConfigSet *cs,
 
   struct Inheritance *i = mutt_mem_calloc(1, sizeof(*i));
   i->parent = parent;
-  i->name = mutt_str_strdup(name);
+  i->name = mutt_str_dup(name);
 
   struct HashElem *he = mutt_hash_typed_insert(cs->hash, i->name, DT_INHERITED, i);
   if (!he)
@@ -832,7 +832,7 @@ intptr_t cs_he_native_get(const struct ConfigSet *cs, struct HashElem *he, struc
   }
 
   if (!var || !cdef)
-    return CSR_ERR_CODE; // LCOV_EXCL_LINE
+    return INT_MIN; // LCOV_EXCL_LINE
 
   return cst->native_get(cs, var, cdef, err);
 }

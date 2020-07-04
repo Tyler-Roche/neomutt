@@ -46,10 +46,10 @@
 #include "lib.h"
 #include "auth.h"
 #include "commands.h"
-#include "globals.h"
 #include "hook.h"
 #include "init.h"
 #include "message.h"
+#include "mutt_globals.h"
 #include "mutt_logging.h"
 #include "mutt_socket.h"
 #include "muttlib.h"
@@ -106,7 +106,7 @@ static int check_capabilities(struct ImapAccountData *adata)
 static char *get_flags(struct ListHead *hflags, char *s)
 {
   /* sanity-check string */
-  const size_t plen = mutt_str_startswith(s, "FLAGS", CASE_IGNORE);
+  const size_t plen = mutt_istr_startswith(s, "FLAGS");
   if (plen == 0)
   {
     mutt_debug(LL_DEBUG1, "not a FLAGS response: %s\n", s);
@@ -131,7 +131,7 @@ static char *get_flags(struct ListHead *hflags, char *s)
     const char ctmp = *s;
     *s = '\0';
     if (*flag_word)
-      mutt_list_insert_tail(hflags, mutt_str_strdup(flag_word));
+      mutt_list_insert_tail(hflags, mutt_str_dup(flag_word));
     *s = ctmp;
   }
 
@@ -163,7 +163,7 @@ static void set_flag(struct Mailbox *m, AclFlags aclflag, int flag,
 {
   if (m->rights & aclflag)
     if (flag && imap_has_flag(&imap_mdata_get(m)->flags, str))
-      mutt_str_strcat(flags, flsize, str);
+      mutt_str_cat(flags, flsize, str);
 }
 
 /**
@@ -371,18 +371,18 @@ static int complete_hosts(char *buf, size_t buflen)
   int rc = -1;
   size_t matchlen;
 
-  matchlen = mutt_str_strlen(buf);
+  matchlen = mutt_str_len(buf);
   struct MailboxList ml = STAILQ_HEAD_INITIALIZER(ml);
   neomutt_mailboxlist_get_all(&ml, NeoMutt, MUTT_MAILBOX_ANY);
   struct MailboxNode *np = NULL;
   STAILQ_FOREACH(np, &ml, entries)
   {
-    if (!mutt_str_startswith(mailbox_path(np->mailbox), buf, CASE_MATCH))
+    if (!mutt_str_startswith(mailbox_path(np->mailbox), buf))
       continue;
 
     if (rc)
     {
-      mutt_str_strfcpy(buf, mailbox_path(np->mailbox), buflen);
+      mutt_str_copy(buf, mailbox_path(np->mailbox), buflen);
       rc = 0;
     }
     else
@@ -404,11 +404,11 @@ static int complete_hosts(char *buf, size_t buflen)
     url.user = NULL;
     url.path = NULL;
     url_tostring(&url, urlstr, sizeof(urlstr), 0);
-    if (mutt_str_strncmp(buf, urlstr, matchlen) == 0)
+    if (mutt_strn_equal(buf, urlstr, matchlen))
     {
       if (rc)
       {
-        mutt_str_strfcpy(buf, urlstr, buflen);
+        mutt_str_copy(buf, urlstr, buflen);
         rc = 0;
       }
       else
@@ -644,7 +644,7 @@ void imap_expunge_mailbox(struct Mailbox *m)
   struct Email *e = NULL;
 
 #ifdef USE_HCACHE
-  mdata->hcache = imap_hcache_open(adata, mdata);
+  imap_hcache_open(adata, mdata);
 #endif
 
   for (int i = 0; i < m->msg_count; i++)
@@ -717,16 +717,15 @@ int imap_open_connection(struct ImapAccountData *adata)
     return -1;
   }
 
-  if (mutt_str_startswith(adata->buf, "* OK", CASE_IGNORE))
+  if (mutt_istr_startswith(adata->buf, "* OK"))
   {
-    if (!mutt_str_startswith(adata->buf, "* OK [CAPABILITY", CASE_IGNORE) &&
-        check_capabilities(adata))
+    if (!mutt_istr_startswith(adata->buf, "* OK [CAPABILITY") && check_capabilities(adata))
     {
       goto bail;
     }
 #ifdef USE_SSL
     /* Attempt STARTTLS if available and desired. */
-    if (!adata->conn->ssf && (C_SslForceTls || (adata->capabilities & IMAP_CAP_STARTTLS)))
+    if ((adata->conn->ssf == 0) && (C_SslForceTls || (adata->capabilities & IMAP_CAP_STARTTLS)))
     {
       enum QuadOption ans;
 
@@ -739,7 +738,10 @@ int imap_open_connection(struct ImapAccountData *adata)
       }
       if (ans == MUTT_YES)
       {
-        enum ImapExecResult rc = imap_exec(adata, "STARTTLS", IMAP_CMD_NO_FLAGS);
+        enum ImapExecResult rc = imap_exec(adata, "STARTTLS", IMAP_CMD_SINGLE);
+        // Clear any data after the STARTTLS acknowledgement
+        mutt_socket_empty(adata->conn);
+
         if (rc == IMAP_EXEC_FATAL)
           goto bail;
         if (rc != IMAP_EXEC_ERROR)
@@ -759,34 +761,26 @@ int imap_open_connection(struct ImapAccountData *adata)
       }
     }
 
-    if (C_SslForceTls && !adata->conn->ssf)
+    if (C_SslForceTls && (adata->conn->ssf == 0))
     {
       mutt_error(_("Encrypted connection unavailable"));
       goto err_close_conn;
     }
 #endif
   }
-  else if (mutt_str_startswith(adata->buf, "* PREAUTH", CASE_IGNORE))
+  else if (mutt_istr_startswith(adata->buf, "* PREAUTH"))
   {
 #ifdef USE_SSL
-    /* An unencrypted PREAUTH response is most likely a MITM attack.
-     * Require a confirmation. */
-    if (adata->conn->ssf == 0)
+    /* Unless using a secure $tunnel, an unencrypted PREAUTH response may be a
+     * MITM attack.  The only way to stop "STARTTLS" MITM attacks is via
+     * $ssl_force_tls: an attacker can easily spoof "* OK" and strip the
+     * STARTTLS capability.  So consult $ssl_force_tls, not $ssl_starttls, to
+     * decide whether to abort. Note that if using $tunnel and
+     * $tunnel_is_secure, adata->conn->ssf will be set to 1. */
+    if ((adata->conn->ssf == 0) && C_SslForceTls)
     {
-      bool proceed = true;
-      if (C_SslForceTls)
-      {
-        proceed = false;
-      }
-      else if (C_SslStarttls != MUTT_NO)
-      {
-        proceed = mutt_yesorno(_("Abort unencrypted PREAUTH connection?"), C_SslStarttls) != MUTT_NO;
-      }
-      if (!proceed)
-      {
-        mutt_error(_("Encrypted connection unavailable"));
-        goto err_close_conn;
-      }
+      mutt_error(_("Encrypted connection unavailable"));
+      goto err_close_conn;
     }
 #endif
 
@@ -846,18 +840,18 @@ bool imap_has_flag(struct ListHead *flag_list, const char *flag)
   if (STAILQ_EMPTY(flag_list))
     return false;
 
-  const size_t flaglen = mutt_str_strlen(flag);
+  const size_t flaglen = mutt_str_len(flag);
   struct ListNode *np = NULL;
   STAILQ_FOREACH(np, flag_list, entries)
   {
     const size_t nplen = strlen(np->data);
     if ((flaglen >= nplen) && ((flag[nplen] == '\0') || (flag[nplen] == ' ')) &&
-        (mutt_str_strncasecmp(np->data, flag, nplen) == 0))
+        mutt_istrn_equal(np->data, flag, nplen))
     {
       return true;
     }
 
-    if (mutt_str_strcmp(np->data, "\\*") == 0)
+    if (mutt_str_equal(np->data, "\\*"))
       return true;
   }
 
@@ -1004,12 +998,12 @@ int imap_sync_message_for_copy(struct Mailbox *m, struct Email *e,
   {
     /* restore system flags */
     if (imap_edata_get(e)->flags_system)
-      mutt_str_strcat(flags, sizeof(flags), imap_edata_get(e)->flags_system);
+      mutt_str_cat(flags, sizeof(flags), imap_edata_get(e)->flags_system);
     /* set custom flags */
     tags = driver_tags_get_with_hidden(&e->tags);
     if (tags)
     {
-      mutt_str_strcat(flags, sizeof(flags), tags);
+      mutt_str_cat(flags, sizeof(flags), tags);
       FREE(&tags);
     }
   }
@@ -1029,7 +1023,7 @@ int imap_sync_message_for_copy(struct Mailbox *m, struct Email *e,
 
     /* erase custom flags */
     if ((m->rights & MUTT_ACL_WRITE) && imap_edata_get(e)->flags_remote)
-      mutt_str_strcat(flags, sizeof(flags), imap_edata_get(e)->flags_remote);
+      mutt_str_cat(flags, sizeof(flags), imap_edata_get(e)->flags_remote);
 
     mutt_str_remove_trailing_ws(flags);
 
@@ -1301,7 +1295,7 @@ int imap_complete(char *buf, size_t buflen, const char *path)
 
   if (imap_adata_find(path, &adata, &mdata) < 0)
   {
-    mutt_str_strfcpy(buf, path, buflen);
+    mutt_str_copy(buf, path, buflen);
     return complete_hosts(buf, buflen);
   }
 
@@ -1312,7 +1306,7 @@ int imap_complete(char *buf, size_t buflen, const char *path)
   imap_cmd_start(adata, tmp);
 
   /* and see what the results are */
-  mutt_str_strfcpy(completion, mdata->name, sizeof(completion));
+  mutt_str_copy(completion, mdata->name, sizeof(completion));
   imap_mdata_free((void *) &mdata);
 
   adata->cmdresult = &listresp;
@@ -1334,7 +1328,7 @@ int imap_complete(char *buf, size_t buflen, const char *path)
       /* copy in first word */
       if (!completions)
       {
-        mutt_str_strfcpy(completion, listresp.name, sizeof(completion));
+        mutt_str_copy(completion, listresp.name, sizeof(completion));
         matchlen = strlen(completion);
         completions++;
         continue;
@@ -1435,7 +1429,7 @@ int imap_fast_trash(struct Mailbox *m, char *dest)
         break;
       }
       /* bail out if command failed for reasons other than nonexistent target */
-      if (!mutt_str_startswith(imap_get_qualifier(adata->buf), "[TRYCREATE]", CASE_IGNORE))
+      if (!mutt_istr_startswith(imap_get_qualifier(adata->buf), "[TRYCREATE]"))
         break;
       mutt_debug(LL_DEBUG3, "server suggests TRYCREATE\n");
       snprintf(prompt, sizeof(prompt), _("Create %s?"), dest_mdata->name);
@@ -1537,7 +1531,7 @@ int imap_sync_mailbox(struct Mailbox *m, bool expunge, bool close)
   }
 
 #ifdef USE_HCACHE
-  mdata->hcache = imap_hcache_open(adata, mdata);
+  imap_hcache_open(adata, mdata);
 #endif
 
   /* save messages with real (non-flag) changes */
@@ -1699,9 +1693,9 @@ static struct Account *imap_ac_find(struct Account *a, const char *path)
   struct ImapAccountData *adata = a->adata;
   struct ConnAccount *cac = &adata->conn->account;
 
-  if (mutt_str_strcasecmp(url->host, cac->host) != 0)
+  if (!mutt_istr_equal(url->host, cac->host))
     a = NULL;
-  else if (url->user && (mutt_str_strcasecmp(url->user, cac->user) != 0))
+  else if (url->user && !mutt_istr_equal(url->user, cac->user))
     a = NULL;
 
   url_free(&url);
@@ -1816,7 +1810,7 @@ int imap_login(struct ImapAccountData *adata)
     {
       adata->state = IMAP_AUTHENTICATED;
       FREE(&adata->capstr);
-      if (adata->conn->ssf)
+      if (adata->conn->ssf != 0)
       {
         mutt_debug(LL_DEBUG2, "Communication encrypted at %d bits\n",
                    adata->conn->ssf);
@@ -1941,7 +1935,7 @@ static int imap_mbox_open(struct Mailbox *m)
 
     /* Obtain list of available flags here, may be overridden by a
      * PERMANENTFLAGS tag in the OK response */
-    if (mutt_str_startswith(pc, "FLAGS", CASE_IGNORE))
+    if (mutt_istr_startswith(pc, "FLAGS"))
     {
       /* don't override PERMANENTFLAGS */
       if (STAILQ_EMPTY(&mdata->flags))
@@ -1953,7 +1947,7 @@ static int imap_mbox_open(struct Mailbox *m)
       }
     }
     /* PERMANENTFLAGS are massaged to look like FLAGS, then override FLAGS */
-    else if (mutt_str_startswith(pc, "OK [PERMANENTFLAGS", CASE_IGNORE))
+    else if (mutt_istr_startswith(pc, "OK [PERMANENTFLAGS"))
     {
       mutt_debug(LL_DEBUG3, "Getting mailbox PERMANENTFLAGS\n");
       /* safe to call on NULL */
@@ -1965,7 +1959,7 @@ static int imap_mbox_open(struct Mailbox *m)
         goto fail;
     }
     /* save UIDVALIDITY for the header cache */
-    else if (mutt_str_startswith(pc, "OK [UIDVALIDITY", CASE_IGNORE))
+    else if (mutt_istr_startswith(pc, "OK [UIDVALIDITY"))
     {
       mutt_debug(LL_DEBUG3, "Getting mailbox UIDVALIDITY\n");
       pc += 3;
@@ -1973,7 +1967,7 @@ static int imap_mbox_open(struct Mailbox *m)
       if (mutt_str_atoui(pc, &mdata->uidvalidity) < 0)
         goto fail;
     }
-    else if (mutt_str_startswith(pc, "OK [UIDNEXT", CASE_IGNORE))
+    else if (mutt_istr_startswith(pc, "OK [UIDNEXT"))
     {
       mutt_debug(LL_DEBUG3, "Getting mailbox UIDNEXT\n");
       pc += 3;
@@ -1981,7 +1975,7 @@ static int imap_mbox_open(struct Mailbox *m)
       if (mutt_str_atoui(pc, &mdata->uid_next) < 0)
         goto fail;
     }
-    else if (mutt_str_startswith(pc, "OK [HIGHESTMODSEQ", CASE_IGNORE))
+    else if (mutt_istr_startswith(pc, "OK [HIGHESTMODSEQ"))
     {
       mutt_debug(LL_DEBUG3, "Getting mailbox HIGHESTMODSEQ\n");
       pc += 3;
@@ -1989,7 +1983,7 @@ static int imap_mbox_open(struct Mailbox *m)
       if (mutt_str_atoull(pc, &mdata->modseq) < 0)
         goto fail;
     }
-    else if (mutt_str_startswith(pc, "OK [NOMODSEQ", CASE_IGNORE))
+    else if (mutt_istr_startswith(pc, "OK [NOMODSEQ"))
     {
       mutt_debug(LL_DEBUG3, "Mailbox has NOMODSEQ set\n");
       mdata->modseq = 0;
@@ -1997,7 +1991,7 @@ static int imap_mbox_open(struct Mailbox *m)
     else
     {
       pc = imap_next_word(pc);
-      if (mutt_str_startswith(pc, "EXISTS", CASE_IGNORE))
+      if (mutt_istr_startswith(pc, "EXISTS"))
       {
         count = mdata->new_mail_count;
         mdata->new_mail_count = 0;
@@ -2017,7 +2011,7 @@ static int imap_mbox_open(struct Mailbox *m)
     goto fail;
 
   /* check for READ-ONLY notification */
-  if (mutt_str_startswith(imap_get_qualifier(adata->buf), "[READ-ONLY]", CASE_IGNORE) &&
+  if (mutt_istr_startswith(imap_get_qualifier(adata->buf), "[READ-ONLY]") &&
       !(adata->capabilities & IMAP_CAP_ACL))
   {
     mutt_debug(LL_DEBUG2, "Mailbox is read-only\n");
@@ -2108,12 +2102,11 @@ static int imap_mbox_open_append(struct Mailbox *m, OpenMailboxFlags flags)
 
 /**
  * imap_mbox_check - Check for new mail - Implements MxOps::mbox_check()
- * @param m          Mailbox
- * @param index_hint Remember our place in the index
+ * @param m           Mailbox
  * @retval >0 Success, e.g. #MUTT_REOPENED
  * @retval -1 Failure
  */
-static int imap_mbox_check(struct Mailbox *m, int *index_hint)
+static int imap_mbox_check(struct Mailbox *m)
 {
   if (!m)
     return -1;
@@ -2218,7 +2211,7 @@ static int imap_tags_edit(struct Mailbox *m, const char *tags, char *buf, size_t
 
   *buf = '\0';
   if (tags)
-    mutt_str_strfcpy(buf, tags, buflen);
+    mutt_str_copy(buf, tags, buflen);
 
   if (mutt_get_field("Tags: ", buf, buflen, MUTT_COMP_NO_FLAGS) != 0)
     return -1;
@@ -2271,9 +2264,7 @@ static int imap_tags_edit(struct Mailbox *m, const char *tags, char *buf, size_t
   new_tag = buf; /* rewind */
   mutt_str_remove_trailing_ws(new_tag);
 
-  if (mutt_str_strcmp(tags, buf) == 0)
-    return 0;
-  return 1;
+  return !mutt_str_equal(tags, buf);
 }
 
 /**
@@ -2361,10 +2352,10 @@ enum MailboxType imap_path_probe(const char *path, const struct stat *st)
   if (!path)
     return MUTT_UNKNOWN;
 
-  if (mutt_str_startswith(path, "imap://", CASE_IGNORE))
+  if (mutt_istr_startswith(path, "imap://"))
     return MUTT_IMAP;
 
-  if (mutt_str_startswith(path, "imaps://", CASE_IGNORE))
+  if (mutt_istr_startswith(path, "imaps://"))
     return MUTT_IMAP;
 
   return MUTT_UNKNOWN;
@@ -2388,7 +2379,7 @@ int imap_path_canon(char *buf, size_t buflen)
   imap_fix_path('\0', url->path, tmp, sizeof(tmp));
   url->path = tmp;
   url_tostring(url, tmp2, sizeof(tmp2), 0);
-  mutt_str_strfcpy(buf, tmp2, buflen);
+  mutt_str_copy(buf, tmp2, buflen);
   url_free(&url);
 
   return 0;
@@ -2428,7 +2419,7 @@ static int imap_path_parent(char *buf, size_t buflen)
   char tmp[PATH_MAX] = { 0 };
 
   imap_get_parent_path(buf, tmp, sizeof(tmp));
-  mutt_str_strfcpy(buf, tmp, buflen);
+  mutt_str_copy(buf, tmp, buflen);
   return 0;
 }
 

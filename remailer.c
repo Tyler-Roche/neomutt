@@ -41,15 +41,15 @@
 #include "gui/lib.h"
 #include "mutt.h"
 #include "format_flags.h"
-#include "globals.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_menu.h"
 #include "muttlib.h"
 #include "opcodes.h"
 #include "options.h"
 #include "protos.h"
 #include "recvattach.h"
-#include "sendlib.h"
+#include "send/lib.h"
 #ifdef MIXMASTER
 #include "remailer.h"
 #endif
@@ -205,7 +205,7 @@ static struct Remailer **mix_type2_list(size_t *l)
   /* first, generate the "random" remailer */
 
   p = remailer_new();
-  p->shortname = mutt_str_strdup(_("<random>"));
+  p->shortname = mutt_str_dup(_("<random>"));
   mix_add_entry(&type2_list, p, &slots, &used);
 
   while (fgets(line, sizeof(line), fp))
@@ -216,13 +216,13 @@ static struct Remailer **mix_type2_list(size_t *l)
     if (!t)
       goto problem;
 
-    p->shortname = mutt_str_strdup(t);
+    p->shortname = mutt_str_dup(t);
 
     t = strtok(NULL, " \t\n");
     if (!t)
       goto problem;
 
-    p->addr = mutt_str_strdup(t);
+    p->addr = mutt_str_dup(t);
 
     t = strtok(NULL, " \t\n");
     if (!t)
@@ -232,7 +232,7 @@ static struct Remailer **mix_type2_list(size_t *l)
     if (!t)
       goto problem;
 
-    p->ver = mutt_str_strdup(t);
+    p->ver = mutt_str_dup(t);
 
     t = strtok(NULL, " \t\n");
     if (!t)
@@ -537,7 +537,7 @@ static int mix_chain_add(struct MixChain *chain, const char *s, struct Remailer 
   if (chain->cl >= MAX_MIXES)
     return -1;
 
-  if ((mutt_str_strcmp(s, "0") == 0) || (mutt_str_strcasecmp(s, "<random>") == 0))
+  if (mutt_str_equal(s, "0") || mutt_istr_equal(s, "<random>"))
   {
     chain->ch[chain->cl++] = 0;
     return 0;
@@ -545,7 +545,7 @@ static int mix_chain_add(struct MixChain *chain, const char *s, struct Remailer 
 
   for (i = 0; type2_list[i]; i++)
   {
-    if (mutt_str_strcasecmp(s, type2_list[i]->shortname) == 0)
+    if (mutt_istr_equal(s, type2_list[i]->shortname))
     {
       chain->ch[chain->cl++] = i;
       return 0;
@@ -573,7 +573,7 @@ static int mutt_dlg_mixmaster_observer(struct NotifyCallback *nc)
   struct EventConfig *ec = nc->event_data;
   struct MuttWindow *dlg = nc->global_data;
 
-  if (mutt_str_strcmp(ec->name, "status_on_top") != 0)
+  if (!mutt_str_equal(ec->name, "status_on_top"))
     return 0;
 
   struct MuttWindow *win_first = TAILQ_FIRST(&dlg->children);
@@ -640,19 +640,14 @@ void mix_make_chain(struct MuttWindow *win, struct ListHead *chainhead, int cols
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_REMAILER, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
 
   struct MuttWindow *index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  index->notify = notify_new();
-  notify_set_parent(index->notify, dlg->notify);
 
   struct MuttWindow *ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  ibar->notify = notify_new();
-  notify_set_parent(ibar->notify, dlg->notify);
 
   if (C_StatusOnTop)
   {
@@ -838,7 +833,7 @@ void mix_make_chain(struct MuttWindow *win, struct ListHead *chainhead, int cols
       else
         t = "*";
 
-      mutt_list_insert_tail(chainhead, mutt_str_strdup(t));
+      mutt_list_insert_tail(chainhead, mutt_str_dup(t));
     }
   }
 

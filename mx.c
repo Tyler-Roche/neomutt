@@ -42,14 +42,14 @@
 #include "email/lib.h"
 #include "core/lib.h"
 #include "alias/lib.h"
+#include "gui/lib.h"
 #include "mutt.h"
 #include "mx.h"
 #include "context.h"
 #include "copy.h"
-#include "globals.h"
 #include "hook.h"
-#include "init.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_header.h"
 #include "mutt_logging.h"
 #include "mutt_mailbox.h"
@@ -155,7 +155,20 @@ const struct MxOps *mx_get_ops(enum MailboxType type)
  */
 static bool mutt_is_spool(const char *str)
 {
-  return mutt_str_strcmp(C_Spoolfile, str) == 0;
+  if (mutt_str_equal(str, C_Spoolfile))
+    return true;
+
+  struct Url *ua = url_parse(str);
+  struct Url *ub = url_parse(C_Spoolfile);
+
+  const bool is_spool =
+      ua && ub && (ua->scheme == ub->scheme) &&
+      mutt_istr_equal(ua->host, ub->host) && mutt_istr_equal(ua->path, ub->path) &&
+      (!ua->user || !ub->user || mutt_str_equal(ua->user, ub->user));
+
+  url_free(&ua);
+  url_free(&ub);
+  return is_spool;
 }
 
 /**
@@ -446,11 +459,10 @@ void mx_fastclose_mailbox(struct Mailbox *m)
 /**
  * sync_mailbox - save changes to disk
  * @param m          Mailbox
- * @param index_hint Current email
  * @retval  0 Success
  * @retval -1 Failure
  */
-static int sync_mailbox(struct Mailbox *m, int *index_hint)
+static int sync_mailbox(struct Mailbox *m)
 {
   if (!m || !m->mx_ops || !m->mx_ops->mbox_sync)
     return -1;
@@ -461,7 +473,7 @@ static int sync_mailbox(struct Mailbox *m, int *index_hint)
     mutt_message(_("Writing %s..."), mailbox_path(m));
   }
 
-  int rc = m->mx_ops->mbox_sync(m, index_hint);
+  int rc = m->mx_ops->mbox_sync(m);
   if (rc != 0)
   {
     mutt_debug(LL_DEBUG2, "mbox_sync returned: %d\n", rc);
@@ -829,7 +841,7 @@ int mx_mbox_close(struct Context **ptr)
 
     if (m->changed || (m->msg_deleted != 0))
     {
-      int check = sync_mailbox(ctx->mailbox, NULL);
+      int check = sync_mailbox(ctx->mailbox);
       if (check != 0)
       {
         rc = check;
@@ -890,7 +902,6 @@ cleanup:
 /**
  * mx_mbox_sync - Save changes to mailbox
  * @param[in]  m          Mailbox
- * @param[out] index_hint Currently selected Email
  * @retval #MUTT_REOPENED  mailbox has been externally modified
  * @retval #MUTT_NEW_MAIL  new mail has arrived
  * @retval  0 Success
@@ -898,7 +909,7 @@ cleanup:
  *
  * @note The flag retvals come from a call to a backend sync function
  */
-int mx_mbox_sync(struct Mailbox *m, int *index_hint)
+int mx_mbox_sync(struct Mailbox *m)
 {
   if (!m)
     return -1;
@@ -913,7 +924,7 @@ int mx_mbox_sync(struct Mailbox *m, int *index_hint)
     if (km_expand_key(buf, sizeof(buf), km_find_func(MENU_MAIN, OP_TOGGLE_WRITE)))
       snprintf(tmp, sizeof(tmp), _(" Press '%s' to toggle write"), buf);
     else
-      mutt_str_strfcpy(tmp, _("Use 'toggle-write' to re-enable write"), sizeof(tmp));
+      mutt_str_copy(tmp, _("Use 'toggle-write' to re-enable write"), sizeof(tmp));
 
     mutt_error(_("Mailbox is marked unwritable. %s"), tmp);
     return -1;
@@ -979,7 +990,7 @@ int mx_mbox_sync(struct Mailbox *m, int *index_hint)
     rc = imap_sync_mailbox(m, purge, false);
   else
 #endif
-    rc = sync_mailbox(m, index_hint);
+    rc = sync_mailbox(m);
   if (rc >= 0)
   {
 #ifdef USE_IMAP
@@ -1096,17 +1107,16 @@ struct Message *mx_msg_open_new(struct Mailbox *m, struct Email *e, MsgOpenFlags
 /**
  * mx_mbox_check - Check for new mail - Wrapper for MxOps::mbox_check()
  * @param m          Mailbox
- * @param index_hint Current email
  * @retval >0 Success, e.g. #MUTT_NEW_MAIL
  * @retval  0 Success, no change
  * @retval -1 Failure
  */
-int mx_mbox_check(struct Mailbox *m, int *index_hint)
+int mx_mbox_check(struct Mailbox *m)
 {
   if (!m || !m->mx_ops)
     return -1;
 
-  int rc = m->mx_ops->mbox_check(m, index_hint);
+  int rc = m->mx_ops->mbox_check(m);
   if ((rc == MUTT_NEW_MAIL) || (rc == MUTT_REOPENED))
     mailbox_changed(m, NT_MAILBOX_INVALID);
 
@@ -1378,7 +1388,7 @@ int mx_path_canon(char *buf, size_t buflen, const char *folder, enum MailboxType
     }
     else if ((buf[0] == '+') || (buf[0] == '='))
     {
-      size_t folder_len = mutt_str_strlen(folder);
+      size_t folder_len = mutt_str_len(folder);
       if ((folder_len > 0) && (folder[folder_len - 1] != '/'))
       {
         buf[0] = '/';
@@ -1470,9 +1480,9 @@ int mx_path_canon2(struct Mailbox *m, const char *folder)
   char buf[PATH_MAX];
 
   if (m->realpath)
-    mutt_str_strfcpy(buf, m->realpath, sizeof(buf));
+    mutt_str_copy(buf, m->realpath, sizeof(buf));
   else
-    mutt_str_strfcpy(buf, mailbox_path(m), sizeof(buf));
+    mutt_str_copy(buf, mailbox_path(m), sizeof(buf));
 
   int rc = mx_path_canon(buf, sizeof(buf), folder, &m->type);
 
@@ -1590,7 +1600,7 @@ struct Mailbox *mx_mbox_find(struct Account *a, const char *path)
   {
     if (!use_url)
     {
-      if (mutt_str_strcmp(np->mailbox->realpath, path) == 0)
+      if (mutt_str_equal(np->mailbox->realpath, path))
         return np->mailbox;
       continue;
     }
@@ -1600,9 +1610,9 @@ struct Mailbox *mx_mbox_find(struct Account *a, const char *path)
     if (!url_a)
       continue;
 
-    if (mutt_str_strcasecmp(url_a->host, url_p->host) != 0)
+    if (!mutt_istr_equal(url_a->host, url_p->host))
       continue;
-    if (url_p->user && (mutt_str_strcasecmp(url_a->user, url_p->user) != 0))
+    if (url_p->user && !mutt_istr_equal(url_a->user, url_p->user))
       continue;
     if (a->type == MUTT_IMAP)
     {
@@ -1611,7 +1621,7 @@ struct Mailbox *mx_mbox_find(struct Account *a, const char *path)
     }
     else
     {
-      if (mutt_str_strcmp(url_a->path, url_p->path) == 0)
+      if (mutt_str_equal(url_a->path, url_p->path))
         break;
     }
   }
@@ -1637,7 +1647,7 @@ struct Mailbox *mx_mbox_find2(const char *path)
     return NULL;
 
   char buf[PATH_MAX];
-  mutt_str_strfcpy(buf, path, sizeof(buf));
+  mutt_str_copy(buf, path, sizeof(buf));
   mx_path_canon(buf, sizeof(buf), C_Folder, NULL);
 
   struct Account *np = NULL;

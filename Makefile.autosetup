@@ -64,7 +64,7 @@ default:	all
 # neomutt
 NEOMUTT=	neomutt$(EXEEXT)
 NEOMUTTOBJS=	browser.o commands.o command_parse.o \
-		complete.o compose.o conststrings.o context.o copy.o edit.o \
+		complete.o compose.o conststrings.o context.o copy.o \
 		editmsg.o enriched.o enter.o flags.o functions.o git_ver.o \
 		handler.o hdrline.o help.o hook.o icommands.o index.o init.o \
 		keymap.o mailcap.o maillist.o main.o menu.o muttlib.o mutt_account.o \
@@ -73,7 +73,7 @@ NEOMUTTOBJS=	browser.o commands.o command_parse.o \
 		mutt_parse.o mutt_signal.o mutt_socket.o mutt_thread.o mx.o \
 		myvar.o opcodes.o pager.o pattern.o postpone.o progress.o \
 		recvattach.o recvcmd.o resize.o rfc3676.o score.o \
-		send.o sendlib.o sidebar.o smtp.o sort.o state.o status.o \
+		sidebar.o sort.o state.o status.o \
 		system.o version.o
 
 @if !HAVE_WCSCASECMP
@@ -204,8 +204,8 @@ $(PWD)/config:
 ###############################################################################
 # libconn
 LIBCONN=	libconn.a
-LIBCONNOBJS=	conn/connaccount.o conn/conn_globals.o conn/getdomain.o \
-		conn/raw.o conn/sasl_plain.o conn/socket.o conn/tunnel.o
+LIBCONNOBJS=	conn/connaccount.o conn/getdomain.o conn/globals.o conn/raw.o \
+		conn/sasl_plain.o conn/socket.o conn/tunnel.o
 @if HAVE_SASL
 LIBCONNOBJS+=	conn/sasl.o
 @endif
@@ -278,10 +278,10 @@ $(PWD)/debug:
 ###############################################################################
 # libemail
 LIBEMAIL=	libemail.a
-LIBEMAILOBJS=	email/attach.o email/body.o email/email.o \
-		email/email_globals.o email/envelope.o email/from.o email/mime.o \
-		email/parameter.o email/parse.o email/rfc2047.o email/rfc2231.o \
-		email/tags.o email/thread.o email/url.o
+LIBEMAILOBJS=	email/attach.o email/body.o email/email.o email/envelope.o \
+		email/from.o email/globals.o email/mime.o email/parameter.o \
+		email/parse.o email/rfc2047.o email/rfc2231.o email/tags.o \
+		email/thread.o email/url.o
 CLEANFILES+=	$(LIBEMAIL) $(LIBEMAILOBJS)
 ALLOBJS+=	$(LIBEMAILOBJS)
 
@@ -390,7 +390,7 @@ LIBMUTTOBJS=	mutt/base64.o mutt/buffer.o mutt/charset.o mutt/date.o \
 		mutt/envlist.o mutt/exit.o mutt/file.o mutt/filter.o \
 		mutt/hash.o mutt/list.o mutt/logging.o mutt/mapping.o \
 		mutt/mbyte.o mutt/md5.o mutt/memory.o mutt/notify.o \
-		mutt/path.o mutt/pool.o mutt/prex.o mutt/regex.o \
+		mutt/path.o mutt/pool.o mutt/prex.o mutt/random.o mutt/regex.o \
 		mutt/signal.o mutt/slist.o mutt/string.o
 CLEANFILES+=	$(LIBMUTT) $(LIBMUTTOBJS)
 ALLOBJS+=	$(LIBMUTTOBJS)
@@ -457,7 +457,7 @@ $(PWD)/notmuch:
 ###############################################################################
 # libpop
 LIBPOP=		libpop.a
-LIBPOPOBJS=	pop/pop.o pop/pop_auth.o pop/pop_lib.o
+LIBPOPOBJS=	pop/pop.o pop/auth.o pop/lib.o
 CLEANFILES+=	$(LIBPOP) $(LIBPOPOBJS)
 ALLOBJS+=	$(LIBPOPOBJS)
 
@@ -466,6 +466,19 @@ $(LIBPOP): $(PWD)/pop $(LIBPOPOBJS)
 	$(RANLIB) $@
 $(PWD)/pop:
 	$(MKDIR_P) $(PWD)/pop
+
+###############################################################################
+# libsend
+LIBSEND=	libsend.a
+LIBSENDOBJS=	send/body.o send/config.o send/header.o send/multipart.o send/send.o send/sendlib.o send/sendmail.o send/smtp.o
+CLEANFILES+=	$(LIBSEND) $(LIBSENDOBJS)
+ALLOBJS+=	$(LIBSENDOBJS)
+
+$(LIBSEND): $(PWD)/send $(LIBSENDOBJS)
+	$(AR) cr $@ $(LIBSENDOBJS)
+	$(RANLIB) $@
+$(PWD)/send:
+	$(MKDIR_P) $(PWD)/send
 
 ###############################################################################
 # libstore
@@ -532,8 +545,9 @@ $(ALLOBJS):
 MUTTLIBS+=	$(LIBAUTOCRYPT) $(LIBPOP) $(LIBNNTP) $(LIBCOMPMBOX) \
 		$(LIBSTORE) $(LIBGUI) $(LIBDEBUG) $(LIBMBOX) $(LIBNOTMUCH) \
 		$(LIBMAILDIR) $(LIBNCRYPT) $(LIBIMAP) $(LIBCONN) $(LIBHCACHE) \
-		$(LIBCOMPRESS) $(LIBBCACHE) $(LIBHISTORY) $(LIBALIAS) $(LIBCORE) \
-		$(LIBCONFIG) $(LIBEMAIL) $(LIBADDRESS) $(LIBMUTT)
+		$(LIBCOMPRESS) $(LIBBCACHE) $(LIBHISTORY) $(LIBALIAS) \
+		$(LIBSEND) $(LIBCORE) $(LIBCONFIG) $(LIBEMAIL) $(LIBADDRESS) \
+		$(LIBMUTT)
 
 # neomutt
 $(NEOMUTT): $(GENERATED) $(NEOMUTTOBJS) $(MUTTLIBS)
@@ -612,7 +626,8 @@ coverage: all test
 	  --directory config \
 	  --directory core \
 	  --directory email \
-	  --directory mutt
+	  --directory mutt \
+	  --directory store
 	-genhtml --output-directory lcov --frames lcov.info
 	lcov --list lcov.info
 @endif

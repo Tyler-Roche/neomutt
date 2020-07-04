@@ -45,8 +45,8 @@
 #include "mutt/lib.h"
 #include "email/lib.h"
 #include "core/lib.h"
-#include "globals.h"
 #include "monitor.h"
+#include "mutt_globals.h"
 #include "muttlib.h"
 #include "mx.h"
 #include "maildir/lib.h"
@@ -257,7 +257,7 @@ int maildir_sync_message(struct Mailbox *m, int msgno)
     mutt_buffer_printf(fullpath, "%s/%s", mailbox_path(m), mutt_b2s(partpath));
     mutt_buffer_printf(oldpath, "%s/%s", mailbox_path(m), e->path);
 
-    if (mutt_str_strcmp(mutt_b2s(fullpath), mutt_b2s(oldpath)) == 0)
+    if (mutt_str_equal(mutt_b2s(fullpath), mutt_b2s(oldpath)))
     {
       /* message hasn't really changed */
       goto cleanup;
@@ -364,7 +364,7 @@ static int maildir_mbox_open_append(struct Mailbox *m, OpenMailboxFlags flags)
  * already knew about.  We don't treat either subdirectory differently, as mail
  * could be copied directly into the cur directory from another agent.
  */
-int maildir_mbox_check(struct Mailbox *m, int *index_hint)
+int maildir_mbox_check(struct Mailbox *m)
 {
   if (!m)
     return -1;
@@ -468,7 +468,7 @@ int maildir_mbox_check(struct Mailbox *m, int *index_hint)
 
       /* check to see if the message has moved to a different
        * subdirectory.  If so, update the associated filename.  */
-      if (mutt_str_strcmp(e->path, p->email->path) != 0)
+      if (!mutt_str_equal(e->path, p->email->path))
         mutt_str_replace(&e->path, p->email->path);
 
       /* if the user hasn't modified the flags on this message, update
@@ -493,8 +493,8 @@ int maildir_mbox_check(struct Mailbox *m, int *index_hint)
     /* This message was not in the list of messages we just scanned.
      * Check to see if we have enough information to know if the
      * message has disappeared out from underneath us.  */
-    else if (((changed & MMC_NEW_DIR) && (strncmp(e->path, "new/", 4) == 0)) ||
-             ((changed & MMC_CUR_DIR) && (strncmp(e->path, "cur/", 4) == 0)))
+    else if (((changed & MMC_NEW_DIR) && mutt_strn_equal(e->path, "new/", 4)) ||
+             ((changed & MMC_CUR_DIR) && mutt_strn_equal(e->path, "cur/", 4)))
     {
       /* This message disappeared, so we need to simulate a "reopen"
        * event.  We know it disappeared because we just scanned the
@@ -610,9 +610,9 @@ int maildir_msg_open_new(struct Mailbox *m, struct Message *msg, struct Email *e
     *suffix = '\0';
 
   if (e && (e->read || e->old))
-    mutt_str_strfcpy(subdir, "cur", sizeof(subdir));
+    mutt_str_copy(subdir, "cur", sizeof(subdir));
   else
-    mutt_str_strfcpy(subdir, "new", sizeof(subdir));
+    mutt_str_copy(subdir, "new", sizeof(subdir));
 
   mode_t omask = umask(mh_umask(m));
   while (true)
@@ -636,7 +636,7 @@ int maildir_msg_open_new(struct Mailbox *m, struct Message *msg, struct Email *e
     else
     {
       mutt_debug(LL_DEBUG2, "Success\n");
-      msg->path = mutt_str_strdup(path);
+      msg->path = mutt_str_dup(path);
       break;
     }
   }

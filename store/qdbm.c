@@ -37,13 +37,16 @@
 #include <villa.h>
 #include "mutt/lib.h"
 #include "lib.h"
-#include "globals.h"
+#include "mutt_globals.h"
 
 /**
  * store_qdbm_open - Implements StoreOps::open()
  */
 static void *store_qdbm_open(const char *path)
 {
+  if (!path)
+    return NULL;
+
   return vlopen(path, VL_OWRITER | VL_OCREAT, VL_CMPLEX);
 }
 

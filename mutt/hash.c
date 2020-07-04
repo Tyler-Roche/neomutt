@@ -56,7 +56,7 @@ static size_t gen_string_hash(union HashKey key, size_t num_elems)
  */
 static int cmp_string_key(union HashKey a, union HashKey b)
 {
-  return mutt_str_strcmp(a.strkey, b.strkey);
+  return mutt_str_cmp(a.strkey, b.strkey);
 }
 
 /**
@@ -79,7 +79,7 @@ static size_t gen_case_string_hash(union HashKey key, size_t num_elems)
  */
 static int cmp_case_string_key(union HashKey a, union HashKey b)
 {
-  return mutt_str_strcasecmp(a.strkey, b.strkey);
+  return mutt_istr_cmp(a.strkey, b.strkey);
 }
 
 /**
@@ -132,7 +132,7 @@ static struct HashElem *union_hash_insert(struct HashTable *table,
                                           union HashKey key, int type, void *data)
 {
   if (!table)
-    return NULL;
+    return NULL; // LCOV_EXCL_LINE
 
   struct HashElem *he = mutt_mem_calloc(1, sizeof(struct HashElem));
   size_t hash = table->gen_hash(key, table->num_elems);
@@ -178,7 +178,7 @@ static struct HashElem *union_hash_insert(struct HashTable *table,
 static struct HashElem *union_hash_find_elem(const struct HashTable *table, union HashKey key)
 {
   if (!table)
-    return NULL;
+    return NULL; // LCOV_EXCL_LINE
 
   size_t hash = table->gen_hash(key, table->num_elems);
   struct HashElem *he = table->table[hash];
@@ -199,7 +199,7 @@ static struct HashElem *union_hash_find_elem(const struct HashTable *table, unio
 static void *union_hash_find(const struct HashTable *table, union HashKey key)
 {
   if (!table)
-    return NULL;
+    return NULL; // LCOV_EXCL_LINE
   struct HashElem *he = union_hash_find_elem(table, key);
   if (he)
     return he->data;
@@ -215,7 +215,7 @@ static void *union_hash_find(const struct HashTable *table, union HashKey key)
 static void union_hash_delete(struct HashTable *table, union HashKey key, const void *data)
 {
   if (!table)
-    return;
+    return; // LCOV_EXCL_LINE
 
   size_t hash = table->gen_hash(key, table->num_elems);
   struct HashElem *he = table->table[hash];
@@ -313,7 +313,7 @@ struct HashElem *mutt_hash_typed_insert(struct HashTable *table,
     return NULL;
 
   union HashKey key;
-  key.strkey = table->strdup_keys ? mutt_str_strdup(strkey) : strkey;
+  key.strkey = table->strdup_keys ? mutt_str_dup(strkey) : strkey;
   return union_hash_insert(table, key, type, data);
 }
 

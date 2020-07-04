@@ -44,8 +44,6 @@
 #include "browser.h"
 #include "commands.h"
 #include "compose.h"
-#include "edit.h"
-#include "globals.h"
 #include "handler.h"
 #include "hdrline.h"
 #include "hook.h"
@@ -53,6 +51,7 @@
 #include "init.h"
 #include "mailcap.h"
 #include "main.h"
+#include "mutt_globals.h"
 #include "mutt_logging.h"
 #include "mutt_mailbox.h"
 #include "mutt_menu.h"
@@ -67,10 +66,7 @@
 #include "remailer.h"
 #include "rfc3676.h"
 #include "score.h"
-#include "send.h"
-#include "sendlib.h"
 #include "sidebar.h"
-#include "smtp.h"
 #include "sort.h"
 #include "status.h"
 #include "bcache/lib.h"
@@ -82,6 +78,7 @@
 #include "nntp/lib.h"
 #include "notmuch/lib.h"
 #include "pop/lib.h"
+#include "send/lib.h"
 #endif
 
 #ifndef ISPELL
@@ -89,6 +86,7 @@
 #endif
 
 /* These options are deprecated */
+char *C_Escape = NULL;
 bool C_IgnoreLinearWhiteSpace = false;
 bool C_HeaderCacheCompress = false;
 #if defined(HAVE_GDBM) || defined(HAVE_BDB)
@@ -1043,7 +1041,7 @@ struct ConfigDef MuttVars[] = {
   ** \fBNote\fP that changes made to the References: and Date: headers are
   ** ignored for interoperability reasons.
   */
-  { "editor", DT_STRING|DT_COMMAND, &C_Editor, IP "vi" },
+  { "editor", DT_STRING|DT_NOT_EMPTY|DT_COMMAND, &C_Editor, IP "vi" },
   /*
   ** .pp
   ** This variable specifies which editor is used by NeoMutt.
@@ -1089,11 +1087,6 @@ struct ConfigDef MuttVars[] = {
   ** .pp
   ** Manually sets the \fIenvelope\fP sender for outgoing messages.
   ** This value is ignored if $$use_envelope_from is \fIunset\fP.
-  */
-  { "escape", DT_STRING, &C_Escape, IP "~" },
-  /*
-  ** .pp
-  ** Escape character to use for functions in the built-in editor.
   */
   { "external_search_command", DT_STRING|DT_COMMAND, &C_ExternalSearchCommand, 0 },
   /*
@@ -3740,7 +3733,7 @@ struct ConfigDef MuttVars[] = {
   ** .pp
   ** \fBSee also:\fP $$sidebar_short_path, $$sidebar_indent_string, $$sidebar_delim_chars.
   */
-  { "sidebar_format", DT_STRING|DT_NOT_EMPTY|R_SIDEBAR, &C_SidebarFormat, IP "%B%*  %n" },
+  { "sidebar_format", DT_STRING|DT_NOT_EMPTY|R_SIDEBAR, &C_SidebarFormat, IP "%D%*  %n" },
   /*
   ** .pp
   ** This variable allows you to customize the sidebar display. This string is
@@ -4427,6 +4420,11 @@ struct ConfigDef MuttVars[] = {
   ** If \fIset\fP (the default), NeoMutt will attempt to use \fCSTARTTLS\fP on servers
   ** advertising the capability. When \fIunset\fP, NeoMutt will not attempt to
   ** use \fCSTARTTLS\fP regardless of the server's capabilities.
+  ** .pp
+  ** \fBNote\fP that \fCSTARTTLS\fP is subject to many kinds of
+  ** attacks, including the ability of a machine-in-the-middle to
+  ** suppress the advertising of support.  Setting $$ssl_force_tls is
+  ** recommended if you rely on \fCSTARTTLS\fP.
   */
 #ifdef USE_SSL_OPENSSL
   { "ssl_use_sslv2", DT_BOOL, &C_SslUseSslv2, false },
@@ -4773,6 +4771,20 @@ struct ConfigDef MuttVars[] = {
   ** Please see "$account-hook" in the manual for how to use different
   ** tunnel commands per connection.
   */
+  { "tunnel_is_secure", DT_BOOL, &C_TunnelIsSecure, true },
+  /*
+  ** .pp
+  ** When \fIset\fP, NeoMutt will assume the $$tunnel connection does not need
+  ** STARTTLS to be enabled.  It will also allow IMAP PREAUTH server
+  ** responses inside a $tunnel to proceed.  This is appropriate if $$tunnel
+  ** uses ssh or directly invokes the server locally.
+  ** .pp
+  ** When \fIunset\fP, NeoMutt will negotiate STARTTLS according to the
+  ** $ssl_starttls and $ssl_force_tls variables.  If $ssl_force_tls is
+  ** set, NeoMutt will abort connecting if an IMAP server responds with PREAUTH.
+  ** This setting is appropriate if $$tunnel does not provide security and
+  ** could be tampered with by attackers.
+  */
 #endif
   { "uncollapse_jump", DT_BOOL, &C_UncollapseJump, false },
   /*
@@ -4955,6 +4967,7 @@ struct ConfigDef MuttVars[] = {
 #endif
   /*--*/
 
+  { "escape", DT_DEPRECATED|DT_STRING, &C_Escape, IP "~" },
 #if defined(HAVE_QDBM) || defined(HAVE_TC) || defined(HAVE_KC)
   { "header_cache_compress",     DT_DEPRECATED|DT_BOOL,            &C_HeaderCacheCompress,    false   },
 #endif

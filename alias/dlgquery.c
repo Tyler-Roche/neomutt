@@ -41,14 +41,14 @@
 #include "lib.h"
 #include "alias.h"
 #include "format_flags.h"
-#include "globals.h"
 #include "gui.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_logging.h"
 #include "mutt_menu.h"
 #include "muttlib.h"
 #include "opcodes.h"
-#include "send.h"
+#include "send/lib.h"
 
 /* These Config Variables are only used in dlgquery.c */
 char *C_QueryCommand; ///< Config: External command to query and external address book
@@ -81,7 +81,7 @@ static bool alias_to_addrlist(struct AddressList *al, struct Alias *alias)
     struct Address *first = TAILQ_FIRST(al);
     struct Address *second = TAILQ_NEXT(first, entries);
     if (!second && !first->personal)
-      first->personal = mutt_str_strdup(alias->name);
+      first->personal = mutt_str_dup(alias->name);
 
     mutt_addrlist_to_intl(al, NULL);
   }
@@ -264,10 +264,10 @@ static int query_run(char *s, bool verbose, struct AliasList *al)
       p = strtok(NULL, "\t\n");
       if (p)
       {
-        alias->name = mutt_str_strdup(p);
+        alias->name = mutt_str_dup(p);
         p = strtok(NULL, "\t\n");
         if (p)
-          alias->comment = mutt_str_strdup(p);
+          alias->comment = mutt_str_dup(p);
       }
       TAILQ_INSERT_TAIL(al, alias, entries);
     }
@@ -315,19 +315,14 @@ static void query_menu(char *buf, size_t buflen, struct AliasList *all, bool ret
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_QUERY, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
 
   struct MuttWindow *index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  index->notify = notify_new();
-  notify_set_parent(index->notify, dlg->notify);
 
   struct MuttWindow *ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  ibar->notify = notify_new();
-  notify_set_parent(ibar->notify, dlg->notify);
 
   if (C_StatusOnTop)
   {
@@ -499,7 +494,7 @@ static void query_menu(char *buf, size_t buflen, struct AliasList *all, bool ret
           mutt_addrlist_to_local(&al);
           tagged = true;
           mutt_addrlist_write(&al, buf, buflen, false);
-          curpos = mutt_str_strlen(buf);
+          curpos = mutt_str_len(buf);
           mutt_addrlist_clear(&al);
         }
       }
@@ -511,7 +506,7 @@ static void query_menu(char *buf, size_t buflen, struct AliasList *all, bool ret
           mutt_addrlist_to_local(&al);
           strcat(buf, ", ");
           mutt_addrlist_write(&al, buf + curpos + 2, buflen - curpos - 2, false);
-          curpos = mutt_str_strlen(buf);
+          curpos = mutt_str_len(buf);
           mutt_addrlist_clear(&al);
         }
       }

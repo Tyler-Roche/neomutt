@@ -92,7 +92,7 @@ static void print_gss_error(OM_uint32 err_maj, OM_uint32 err_min)
       buf_min[status_len] = '\0';
       gss_release_buffer(&min_stat, &status_string);
     }
-  } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
+  } while (!GSS_ERROR(maj_stat) && (msg_ctx != 0));
 
   mutt_debug(LL_DEBUG2, "((%s:%d )(%s:%d))\n", buf_maj, err_maj, buf_min, err_min);
 }
@@ -164,7 +164,7 @@ enum ImapAuthRes imap_auth_gss(struct ImapAccountData *adata, const char *method
   }
 
   /* now begin login */
-  mutt_message(_("Authenticating (GSSAPI)..."));
+  mutt_message(_("Authenticating (%s)..."), "GSSAPI");
 
   imap_cmd_start(adata, "AUTHENTICATE GSSAPI");
 

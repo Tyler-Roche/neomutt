@@ -23,7 +23,10 @@
 /**
  * @page config_number Type: Number
  *
- * Type representing a number.
+ * Config type representing a number.
+ *
+ * - Backed by `short`
+ * - Validator is passed `short`
  */
 
 #include "config.h"
@@ -189,7 +192,7 @@ static int number_string_plus_equals(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * number_string_minus_equals - Subtract from a Number by string - Implements ConfigSetType::string_plus_equals()
+ * number_string_minus_equals - Subtract from a Number by string - Implements ConfigSetType::string_minus_equals()
  */
 static int number_string_minus_equals(const struct ConfigSet *cs, void *var,
                                       const struct ConfigDef *cdef,

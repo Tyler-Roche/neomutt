@@ -35,13 +35,16 @@
 #include <stdio.h>
 #include "mutt/lib.h"
 #include "lib.h"
-#include "globals.h"
+#include "mutt_globals.h"
 
 /**
  * store_kyotocabinet_open - Implements StoreOps::open()
  */
 static void *store_kyotocabinet_open(const char *path)
 {
+  if (!path)
+    return NULL;
+
   KCDB *db = kcdbnew();
   if (!db)
     return NULL;
@@ -80,6 +83,9 @@ static void *store_kyotocabinet_fetch(void *store, const char *key, size_t klen,
  */
 static void store_kyotocabinet_free(void *store, void **ptr)
 {
+  if (!ptr || !*ptr)
+    return;
+
   kcfree(*ptr);
   *ptr = NULL;
 }

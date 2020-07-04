@@ -34,7 +34,7 @@
 #include "mutt/lib.h"
 #include "gui/lib.h"
 #include "progress.h"
-#include "globals.h"
+#include "mutt_globals.h"
 #include "mutt_logging.h"
 #include "muttlib.h"
 #include "options.h"
@@ -158,7 +158,7 @@ void mutt_progress_init(struct Progress *progress, const char *msg,
 
   /* Initialize Progress structure */
   memset(progress, 0, sizeof(struct Progress));
-  mutt_str_strfcpy(progress->msg, msg, sizeof(progress->msg));
+  mutt_str_copy(progress->msg, msg, sizeof(progress->msg));
   progress->size = size;
   progress->inc = progress_choose_increment(type);
   progress->is_bytes = (type == MUTT_PROGRESS_NET);

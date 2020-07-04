@@ -31,8 +31,8 @@
 #include <stdio.h>
 #include "mutt/lib.h"
 #include "gui/lib.h"
-#include "globals.h"
 #include "keymap.h"
+#include "mutt_globals.h"
 #include "mutt_menu.h"
 #include "opcodes.h"
 #include "options.h"
@@ -60,19 +60,14 @@ int dlg_verify_cert(const char *title, struct ListHead *list, bool allow_always,
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_CERTIFICATE, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
 
   struct MuttWindow *index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  index->notify = notify_new();
-  notify_set_parent(index->notify, dlg->notify);
 
   struct MuttWindow *ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  ibar->notify = notify_new();
-  notify_set_parent(ibar->notify, dlg->notify);
 
   if (C_StatusOnTop)
   {
@@ -144,9 +139,9 @@ int dlg_verify_cert(const char *title, struct ListHead *list, bool allow_always,
   char buf[128] = { 0 };
   char helpstr[1024] = { 0 };
   mutt_make_help(buf, sizeof(buf), _("Exit  "), MENU_GENERIC, OP_EXIT);
-  mutt_str_strcat(helpstr, sizeof(helpstr), buf);
+  mutt_str_cat(helpstr, sizeof(helpstr), buf);
   mutt_make_help(buf, sizeof(buf), _("Help"), MENU_GENERIC, OP_HELP);
-  mutt_str_strcat(helpstr, sizeof(helpstr), buf);
+  mutt_str_cat(helpstr, sizeof(helpstr), buf);
   menu->help = helpstr;
 
   bool old_ime = OptIgnoreMacroEvents;

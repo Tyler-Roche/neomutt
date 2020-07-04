@@ -32,4 +32,18 @@ void test_mutt_buffer_substrcpy(void)
   {
     TEST_CHECK(mutt_buffer_substrcpy(NULL, NULL, NULL) == 0);
   }
+
+  {
+    char *src = "abcdefghijklmnopqrstuvwxyz";
+    char *result = "jklmnopqr";
+
+    struct Buffer buf = mutt_buffer_make(32);
+
+    size_t len = mutt_buffer_substrcpy(&buf, src + 9, src + 18);
+
+    TEST_CHECK(len == 9);
+    TEST_CHECK(mutt_str_equal(mutt_b2s(&buf), result));
+
+    mutt_buffer_dealloc(&buf);
+  }
 }

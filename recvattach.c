@@ -43,7 +43,6 @@
 #include "commands.h"
 #include "context.h"
 #include "format_flags.h"
-#include "globals.h"
 #include "handler.h"
 #include "hdrline.h"
 #include "hook.h"
@@ -51,6 +50,7 @@
 #include "keymap.h"
 #include "mailcap.h"
 #include "mutt_attach.h"
+#include "mutt_globals.h"
 #include "mutt_menu.h"
 #include "mutt_parse.h"
 #include "muttlib.h"
@@ -58,10 +58,9 @@
 #include "opcodes.h"
 #include "options.h"
 #include "recvcmd.h"
-#include "send.h"
-#include "sendlib.h"
 #include "state.h"
 #include "ncrypt/lib.h"
+#include "send/lib.h"
 #ifdef ENABLE_NLS
 #include <libintl.h>
 #endif
@@ -166,11 +165,11 @@ void mutt_update_tree(struct AttachCtx *actx)
 
     if (actx->idx[rindex]->tree)
     {
-      if (mutt_str_strcmp(actx->idx[rindex]->tree, buf) != 0)
+      if (!mutt_str_equal(actx->idx[rindex]->tree, buf))
         mutt_str_replace(&actx->idx[rindex]->tree, buf);
     }
     else
-      actx->idx[rindex]->tree = mutt_str_strdup(buf);
+      actx->idx[rindex]->tree = mutt_str_dup(buf);
 
     if (((2 * (actx->idx[rindex]->level + 2)) < sizeof(buf)) &&
         actx->idx[rindex]->level)
@@ -933,8 +932,8 @@ static bool can_print(struct AttachCtx *actx, struct Body *top, bool tag)
     {
       if (!mailcap_lookup(top, type, sizeof(type), NULL, MUTT_MC_PRINT))
       {
-        if ((mutt_str_strcasecmp("text/plain", top->subtype) != 0) &&
-            (mutt_str_strcasecmp("application/postscript", top->subtype) != 0))
+        if (!mutt_istr_equal("text/plain", top->subtype) &&
+            !mutt_istr_equal("application/postscript", top->subtype))
         {
           if (!mutt_can_decode(top))
           {
@@ -977,8 +976,8 @@ static void print_attachment_list(struct AttachCtx *actx, FILE *fp, bool tag,
       snprintf(type, sizeof(type), "%s/%s", TYPE(top), top->subtype);
       if (!C_AttachSplit && !mailcap_lookup(top, type, sizeof(type), NULL, MUTT_MC_PRINT))
       {
-        if ((mutt_str_strcasecmp("text/plain", top->subtype) == 0) ||
-            (mutt_str_strcasecmp("application/postscript", top->subtype) == 0))
+        if (mutt_istr_equal("text/plain", top->subtype) ||
+            mutt_istr_equal("application/postscript", top->subtype))
         {
           pipe_attachment(fp, top, state);
         }
@@ -1259,8 +1258,7 @@ void mutt_generate_recvattach_list(struct AttachCtx *actx, struct Email *e,
        * We can't distinguish an actual part from a failure, so only use a
        * text/plain that results from a single top-level part. */
       if (secured && (new_body->type == TYPE_TEXT) &&
-          (mutt_str_strcasecmp("plain", new_body->subtype) == 0) &&
-          ((parts != m) || m->next))
+          mutt_istr_equal("plain", new_body->subtype) && ((parts != m) || m->next))
       {
         mutt_body_free(&new_body);
         mutt_file_fclose(&fp_new);
@@ -1300,7 +1298,7 @@ void mutt_generate_recvattach_list(struct AttachCtx *actx, struct Email *e,
 
     /* Strip out the top level multipart */
     if ((m->type == TYPE_MULTIPART) && m->parts && !need_secured &&
-        ((parent_type == -1) && mutt_str_strcasecmp("alternative", m->subtype)))
+        ((parent_type == -1) && !mutt_istr_equal("alternative", m->subtype)))
     {
       mutt_generate_recvattach_list(actx, e, m->parts, fp, m->type, level, decrypted);
     }
@@ -1336,7 +1334,7 @@ void mutt_attach_init(struct AttachCtx *actx)
 {
   /* Collapse the attachments if '$digest_collapse' is set AND if...
    * the outer container is of type 'multipart/digest' */
-  bool digest = (mutt_str_strcasecmp(actx->email->content->subtype, "digest") == 0);
+  bool digest = mutt_istr_equal(actx->email->content->subtype, "digest");
 
   for (int i = 0; i < actx->idxlen; i++)
   {
@@ -1344,10 +1342,9 @@ void mutt_attach_init(struct AttachCtx *actx)
 
     /* OR an inner container is of type 'multipart/digest' */
     actx->idx[i]->content->collapsed =
-        (C_DigestCollapse &&
-         (digest ||
-          ((actx->idx[i]->content->type == TYPE_MULTIPART) &&
-           (mutt_str_strcasecmp(actx->idx[i]->content->subtype, "digest") == 0))));
+        (C_DigestCollapse && (digest ||
+                              ((actx->idx[i]->content->type == TYPE_MULTIPART) &&
+                               mutt_istr_equal(actx->idx[i]->content->subtype, "digest"))));
   }
 }
 
@@ -1397,7 +1394,7 @@ static void attach_collapse(struct AttachCtx *actx, struct Menu *menu)
   while ((rindex < actx->idxlen) && (actx->idx[rindex]->level > curlevel))
   {
     if (C_DigestCollapse && (actx->idx[rindex]->content->type == TYPE_MULTIPART) &&
-        !mutt_str_strcasecmp(actx->idx[rindex]->content->subtype, "digest"))
+        mutt_istr_equal(actx->idx[rindex]->content->subtype, "digest"))
     {
       actx->idx[rindex]->content->collapsed = true;
     }
@@ -1432,19 +1429,14 @@ void mutt_view_attachments(struct Email *e)
   struct MuttWindow *dlg =
       mutt_window_new(WT_DLG_ATTACH, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  dlg->notify = notify_new();
 
   struct MuttWindow *index =
       mutt_window_new(WT_INDEX, MUTT_WIN_ORIENT_VERTICAL, MUTT_WIN_SIZE_MAXIMISE,
                       MUTT_WIN_SIZE_UNLIMITED, MUTT_WIN_SIZE_UNLIMITED);
-  index->notify = notify_new();
-  notify_set_parent(index->notify, dlg->notify);
 
   struct MuttWindow *ibar =
       mutt_window_new(WT_INDEX_BAR, MUTT_WIN_ORIENT_VERTICAL,
                       MUTT_WIN_SIZE_FIXED, MUTT_WIN_SIZE_UNLIMITED, 1);
-  ibar->notify = notify_new();
-  notify_set_parent(ibar->notify, dlg->notify);
 
   if (C_StatusOnTop)
   {
@@ -1684,7 +1676,8 @@ void mutt_view_attachments(struct Email *e)
         CHECK_ATTACH;
 
         if (!CUR_ATTACH->content->email->env->followup_to ||
-            (mutt_str_strcasecmp(CUR_ATTACH->content->email->env->followup_to, "poster") != 0) ||
+            !mutt_istr_equal(CUR_ATTACH->content->email->env->followup_to,
+                             "poster") ||
             (query_quadoption(C_FollowupToPoster,
                               _("Reply by mail as poster prefers?")) != MUTT_YES))
         {

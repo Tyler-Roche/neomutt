@@ -23,7 +23,12 @@
 /**
  * @page config_mbtable Type: Multi-byte character table
  *
- * Type representing a multibyte character table.
+ * Config type representing a multibyte character table.
+ *
+ * - Backed by `struct MbTable`
+ * - Empty multibyte character table is stored as `NULL`
+ * - Validator is passed `struct MbTable`, which may be `NULL`
+ * - Data is freed when `ConfigSet` is freed
  */
 
 #include "config.h"
@@ -48,13 +53,13 @@ struct MbTable *mbtable_parse(const char *s)
   mbstate_t mbstate;
   char *d = NULL;
 
-  slen = mutt_str_strlen(s);
+  slen = mutt_str_len(s);
   if (!slen)
     return NULL;
 
   t = mutt_mem_calloc(1, sizeof(struct MbTable));
 
-  t->orig_str = mutt_str_strdup(s);
+  t->orig_str = mutt_str_dup(s);
   /* This could be more space efficient.  However, being used on tiny
    * strings (C_ToChars and C_StatusChars), the overhead is not great. */
   t->chars = mutt_mem_calloc(slen, sizeof(char *));
@@ -97,12 +102,12 @@ static void mbtable_destroy(const struct ConfigSet *cs, void *var, const struct 
 }
 
 /**
- * mbtable_string_set - Set a MbTable by string - Implements ConfigSetType::string_set()
+ * mbtable_string_set - Set an MbTable by string - Implements ConfigSetType::string_set()
  */
 static int mbtable_string_set(const struct ConfigSet *cs, void *var, struct ConfigDef *cdef,
                               const char *value, struct Buffer *err)
 {
-  /* Store empty strings as NULL */
+  /* Store empty mbtables as NULL */
   if (value && (value[0] == '\0'))
     value = NULL;
 
@@ -113,7 +118,7 @@ static int mbtable_string_set(const struct ConfigSet *cs, void *var, struct Conf
   if (var)
   {
     struct MbTable *curval = *(struct MbTable **) var;
-    if (curval && (mutt_str_strcmp(value, curval->orig_str) == 0))
+    if (curval && mutt_str_equal(value, curval->orig_str))
       return CSR_SUCCESS | CSR_SUC_NO_CHANGE;
 
     table = mbtable_parse(value);
@@ -142,7 +147,7 @@ static int mbtable_string_set(const struct ConfigSet *cs, void *var, struct Conf
       FREE(&cdef->initial);
 
     cdef->type |= DT_INITIAL_SET;
-    cdef->initial = IP mutt_str_strdup(value);
+    cdef->initial = IP mutt_str_dup(value);
   }
 
   return rc;
@@ -183,12 +188,12 @@ static struct MbTable *mbtable_dup(struct MbTable *table)
     return NULL; /* LCOV_EXCL_LINE */
 
   struct MbTable *m = mutt_mem_calloc(1, sizeof(*m));
-  m->orig_str = mutt_str_strdup(table->orig_str);
+  m->orig_str = mutt_str_dup(table->orig_str);
   return m;
 }
 
 /**
- * mbtable_native_set - Set a MbTable config item by MbTable object - Implements ConfigSetType::native_set()
+ * mbtable_native_set - Set an MbTable config item by MbTable object - Implements ConfigSetType::native_set()
  */
 static int mbtable_native_set(const struct ConfigSet *cs, void *var,
                               const struct ConfigDef *cdef, intptr_t value,
@@ -243,7 +248,7 @@ static int mbtable_reset(const struct ConfigSet *cs, void *var,
   if (!curtable)
     rc |= CSR_SUC_EMPTY;
 
-  if (mutt_str_strcmp(initial, curval) == 0)
+  if (mutt_str_equal(initial, curval))
     return rc | CSR_SUC_NO_CHANGE;
 
   if (initial)

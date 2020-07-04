@@ -57,12 +57,12 @@
 #include "browser.h"
 #include "commands.h"
 #include "context.h"
-#include "globals.h"
 #include "hook.h"
 #include "index.h"
 #include "init.h"
 #include "keymap.h"
 #include "mutt_attach.h"
+#include "mutt_globals.h"
 #include "mutt_history.h"
 #include "mutt_logging.h"
 #include "mutt_mailbox.h"
@@ -72,10 +72,9 @@
 #include "myvar.h"
 #include "options.h"
 #include "protos.h"
-#include "send.h"
-#include "sendlib.h"
 #include "version.h"
 #include "ncrypt/lib.h"
+#include "send/lib.h"
 #ifdef ENABLE_NLS
 #include <libintl.h>
 #endif
@@ -203,7 +202,6 @@ static void usage(void)
          "  -s <subject>  Specify a subject (must be enclosed in quotes if it has spaces)\n"
          "  -v            Print the NeoMutt version and compile-time definitions and exit\n"
          "  -vv           Print the NeoMutt license and copyright information and exit\n"
-         "  -x            Simulate the mailx(1) send mode\n"
          "  -y            Start NeoMutt with a listing of all defined mailboxes\n"
          "  -Z            Open the first mailbox with new message or exit immediately with\n"
          "                exit code 1 if none is found in all defined mailboxes\n"
@@ -301,9 +299,9 @@ static bool get_user_info(struct ConfigSet *cs)
   if (pw)
   {
     if (!Username)
-      Username = mutt_str_strdup(pw->pw_name);
+      Username = mutt_str_dup(pw->pw_name);
     if (!HomeDir)
-      HomeDir = mutt_str_strdup(pw->pw_dir);
+      HomeDir = mutt_str_dup(pw->pw_dir);
     if (!shell)
       cs_str_initial_set(cs, "shell", pw->pw_shell, NULL);
   }
@@ -410,10 +408,6 @@ int main(int argc, char *argv[], char *envp[])
 
   init_locale();
 
-  int out = 0;
-  if (mutt_randbuf(&out, sizeof(out)) < 0)
-    goto main_exit; // TEST02: neomutt (as root on non-Linux OS, rename /dev/urandom)
-
   umask(077);
 
   mutt_envlist_init(envp);
@@ -434,7 +428,7 @@ int main(int argc, char *argv[], char *envp[])
 
       /* non-option, either an attachment or address */
       if (!STAILQ_EMPTY(&attach))
-        mutt_list_insert_tail(&attach, mutt_str_strdup(argv[optind]));
+        mutt_list_insert_tail(&attach, mutt_str_dup(argv[optind]));
       else
         argv[nargc++] = argv[optind];
     }
@@ -446,19 +440,19 @@ int main(int argc, char *argv[], char *envp[])
       switch (i)
       {
         case 'A':
-          mutt_list_insert_tail(&alias_queries, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&alias_queries, mutt_str_dup(optarg));
           break;
         case 'a':
-          mutt_list_insert_tail(&attach, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&attach, mutt_str_dup(optarg));
           break;
         case 'B':
           batch_mode = true;
           break;
         case 'b':
-          mutt_list_insert_tail(&bcc_list, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&bcc_list, mutt_str_dup(optarg));
           break;
         case 'c':
-          mutt_list_insert_tail(&cc_list, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&cc_list, mutt_str_dup(optarg));
           break;
         case 'D':
           dump_variables = true;
@@ -470,10 +464,10 @@ int main(int argc, char *argv[], char *envp[])
           edit_infile = true;
           break;
         case 'e':
-          mutt_list_insert_tail(&commands, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&commands, mutt_str_dup(optarg));
           break;
         case 'F':
-          mutt_list_insert_tail(&Muttrc, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&Muttrc, mutt_str_dup(optarg));
           break;
         case 'f':
           mutt_buffer_strcpy(&folder, optarg);
@@ -506,7 +500,7 @@ int main(int argc, char *argv[], char *envp[])
           sendflags |= SEND_POSTPONED;
           break;
         case 'Q':
-          mutt_list_insert_tail(&queries, mutt_str_strdup(optarg));
+          mutt_list_insert_tail(&queries, mutt_str_dup(optarg));
           break;
         case 'R':
           flags |= MUTT_CLI_RO; /* read-only mode */
@@ -524,9 +518,6 @@ int main(int argc, char *argv[], char *envp[])
 #endif
         case 'v':
           version++;
-          break;
-        case 'x': /* mailx compatible send mode */
-          sendflags |= SEND_MAILX;
           break;
         case 'y': /* My special hack mode */
           flags |= MUTT_CLI_SELECT;
@@ -734,7 +725,7 @@ int main(int argc, char *argv[], char *envp[])
   {
     rc = 0;
     for (; optind < argc; optind++)
-      mutt_list_insert_tail(&alias_queries, mutt_str_strdup(argv[optind]));
+      mutt_list_insert_tail(&alias_queries, mutt_str_dup(argv[optind]));
     struct ListNode *np = NULL;
     STAILQ_FOREACH(np, &alias_queries, entries)
     {
@@ -743,7 +734,7 @@ int main(int argc, char *argv[], char *envp[])
       {
         /* output in machine-readable form */
         mutt_addrlist_to_intl(al, NULL);
-        mutt_write_addrlist(al, stdout, 0, 0);
+        mutt_addrlist_write_file(al, stdout, 0, false);
       }
       else
       {
@@ -867,7 +858,7 @@ int main(int argc, char *argv[], char *envp[])
     }
 
     if (subject)
-      e->env->subject = mutt_str_strdup(subject);
+      e->env->subject = mutt_str_dup(subject);
 
     if (draft_file)
     {
@@ -884,7 +875,7 @@ int main(int argc, char *argv[], char *envp[])
       /* Prepare fp_in and expanded_infile. */
       if (infile)
       {
-        if (mutt_str_strcmp("-", infile) == 0)
+        if (mutt_str_equal("-", infile))
         {
           if (edit_infile)
           {
@@ -982,7 +973,7 @@ int main(int argc, char *argv[], char *envp[])
         struct ListNode *np = NULL, *tmp = NULL;
         STAILQ_FOREACH_SAFE(np, &e->env->userhdrs, entries, tmp)
         {
-          if (mutt_str_startswith(np->data, "X-Mutt-Resume-Draft:", CASE_IGNORE))
+          if (mutt_istr_startswith(np->data, "X-Mutt-Resume-Draft:"))
           {
             if (C_ResumeEditedDraftFiles)
               cs_str_native_set(cs, "resume_draft_files", true, NULL);
@@ -1221,11 +1212,9 @@ int main(int argc, char *argv[], char *envp[])
       sb_set_open_mailbox(Context ? Context->mailbox : NULL);
 #endif
       struct MuttWindow *dlg = index_pager_init();
-      notify_observer_add(NeoMutt->notify, mutt_dlgindex_observer, dlg);
       dialog_push(dlg);
       mutt_index_menu(dlg);
       dialog_pop();
-      notify_observer_remove(NeoMutt->notify, mutt_dlgindex_observer, dlg);
       index_pager_shutdown(dlg);
       mutt_window_free(&dlg);
       ctx_free(&Context);

@@ -23,7 +23,12 @@
 /**
  * @page config_regex Type: Regular expression
  *
- * Type representing a regular expression.
+ * Config type representing a regular expression.
+ *
+ * - Backed by `struct Regex`
+ * - Empty regular expression is stored as `NULL`
+ * - Validator is passed `struct Regex`, which may be `NULL`
+ * - Data is freed when `ConfigSet` is freed
  */
 
 #include "config.h"
@@ -81,7 +86,7 @@ struct Regex *regex_new(const char *str, int flags, struct Buffer *err)
   struct Regex *reg = mutt_mem_calloc(1, sizeof(struct Regex));
 
   reg->regex = mutt_mem_calloc(1, sizeof(regex_t));
-  reg->pattern = mutt_str_strdup(str);
+  reg->pattern = mutt_str_dup(str);
 
   /* Should we use smart case matching? */
   if (((flags & DT_REGEX_MATCH_CASE) == 0) && mutt_mb_is_lower(str))
@@ -115,7 +120,7 @@ struct Regex *regex_new(const char *str, int flags, struct Buffer *err)
 static int regex_string_set(const struct ConfigSet *cs, void *var, struct ConfigDef *cdef,
                             const char *value, struct Buffer *err)
 {
-  /* Store empty strings as NULL */
+  /* Store empty regexes as NULL */
   if (value && (value[0] == '\0'))
     value = NULL;
 
@@ -126,7 +131,7 @@ static int regex_string_set(const struct ConfigSet *cs, void *var, struct Config
   if (var)
   {
     struct Regex *curval = *(struct Regex **) var;
-    if (curval && (mutt_str_strcmp(value, curval->pattern) == 0))
+    if (curval && mutt_str_equal(value, curval->pattern))
       return CSR_SUCCESS | CSR_SUC_NO_CHANGE;
 
     if (value)
@@ -160,7 +165,7 @@ static int regex_string_set(const struct ConfigSet *cs, void *var, struct Config
       FREE(&cdef->initial);
 
     cdef->type |= DT_INITIAL_SET;
-    cdef->initial = IP mutt_str_strdup(value);
+    cdef->initial = IP mutt_str_dup(value);
   }
 
   return rc;
@@ -260,7 +265,7 @@ static int regex_reset(const struct ConfigSet *cs, void *var,
   if (!currx)
     rc |= CSR_SUC_EMPTY;
 
-  if (mutt_str_strcmp(initial, curval) == 0)
+  if (mutt_str_equal(initial, curval))
     return rc | CSR_SUC_NO_CHANGE;
 
   if (initial)

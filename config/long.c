@@ -23,7 +23,10 @@
 /**
  * @page config_long Type: Long
  *
- * Type representing a long.
+ * Config type representing a long.
+ *
+ * - Backed by `long`
+ * - Validator is passed `long`
  */
 
 #include "config.h"
@@ -101,7 +104,7 @@ static int long_string_get(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * long_native_set - Set a Long config item by int - Implements ConfigSetType::native_set()
+ * long_native_set - Set a Long config item by long - Implements ConfigSetType::native_set()
  */
 static int long_native_set(const struct ConfigSet *cs, void *var,
                            const struct ConfigDef *cdef, intptr_t value, struct Buffer *err)
@@ -128,7 +131,7 @@ static int long_native_set(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * long_native_get - Get an int from a Long config item - Implements ConfigSetType::native_get()
+ * long_native_get - Get a long from a Long config item - Implements ConfigSetType::native_get()
  */
 static intptr_t long_native_get(const struct ConfigSet *cs, void *var,
                                 const struct ConfigDef *cdef, struct Buffer *err)
@@ -173,7 +176,7 @@ static int long_string_plus_equals(const struct ConfigSet *cs, void *var,
 }
 
 /**
- * long_string_minus_equals - Subtract from a Long by string - Implements ConfigSetType::string_plus_equals()
+ * long_string_minus_equals - Subtract from a Long by string - Implements ConfigSetType::string_minus_equals()
  */
 static int long_string_minus_equals(const struct ConfigSet *cs, void *var,
                                     const struct ConfigDef *cdef,
