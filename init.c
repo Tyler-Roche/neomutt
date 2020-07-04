@@ -1019,12 +1019,12 @@ enum CommandResult mutt_parse_rc_buffer(struct Buffer *line,
         break; /* Continue with next command */
       }
     }
-    if (!Commands[i].name)
+    if (!Commands[i].name && !(strcmp(Commands[i].name, "-nopoll")))
     {
       mutt_buffer_printf(err, _("%s: unknown command"), NONULL(token->data));
       rc = MUTT_CMD_ERROR;
       break; /* Ignore the rest of the line */
-    }
+    } else { break; }
   }
 finish:
   return rc;

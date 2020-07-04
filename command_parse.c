@@ -891,16 +891,31 @@ enum CommandResult parse_mailboxes(struct Buffer *buf, struct Buffer *s,
 
     if (data & MUTT_NAMED)
     {
+	  /* Writes string in quotes to buf */
       mutt_extract_token(buf, s, MUTT_TOKEN_NO_FLAGS);
       if (buf->data && (*buf->data != '\0'))
       {
         m->name = mutt_str_strdup(buf->data);
       }
-      else
+	  else
       {
         mailbox_free(&m);
         continue;
       }
+	  if (strstr(s->data, "-nopoll") != NULL)
+	  {
+		  m->poll = false;
+	  } else if (strstr(s->data, "-poll") != NULL)
+	  {
+		  m->poll = true;
+	  }
+	  if (strstr(s->data, "-nonotify") != NULL)
+	  {
+		  m->should_notify = false;
+	  } else if (strstr(s->data, "-notify") != NULL)
+	  {
+		  m->should_notify = true;
+	  }
     }
 
     mutt_extract_token(buf, s, MUTT_TOKEN_NO_FLAGS);
@@ -909,17 +924,31 @@ enum CommandResult parse_mailboxes(struct Buffer *buf, struct Buffer *s,
       /* Skip empty tokens. */
       mailbox_free(&m);
       continue;
-    }
+    } else if ( strcmp(buf->data, "-nopoll") == 0 )
+	{
+		m->poll = false;
+	} else if ( strcmp(buf->data, "-poll") == 0 )
+	{
+		m->poll = true;
+	} else if ( strcmp(buf->data, "-nonotify") == 0 )
+	{
+		m->should_notify = false;
+	} else if ( strcmp(buf->data, "-notify") == 0 )
+	{
+		m->should_notify = true;
+	}
+
 
     mutt_buffer_strcpy(&m->pathbuf, buf->data);
     /* int rc = */ mx_path_canon2(m, C_Folder);
 
-    if (m->type <= MUTT_UNKNOWN)
+	/* Use strcmp for now, maybe change in future */
+	if (m->type <= MUTT_UNKNOWN && (strcmp(buf->data, "-nopoll") != 0) && (strcmp(buf->data, "-poll") != 0) && (strcmp(buf->data, "-nonotify") != 0) && (strcmp(buf->data, "-notify") != 0))
     {
       mutt_error("Unknown Mailbox: %s", m->realpath);
       mailbox_free(&m);
       return MUTT_CMD_ERROR;
-    }
+	}
 
     bool new_account = false;
     struct Account *a = mx_ac_find(m);

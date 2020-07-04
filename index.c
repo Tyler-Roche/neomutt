@@ -1208,7 +1208,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
     if (Context)
       Context->menu = menu;
 
-    if (Context && Context->mailbox && !attach_msg)
+    if (Context && Context->mailbox && !attach_msg && Context->mailbox->poll)
     {
       /* check for new mail in the mailbox.  If nonzero, then something has
        * changed about the file (either we got new mail or the file was
@@ -1247,7 +1247,7 @@ int mutt_index_menu(struct MuttWindow *dlg)
               mutt_message(_("New mail in this mailbox"));
               if (C_BeepNew)
                 mutt_beep(true);
-              if (C_NewMailCommand)
+              if (C_NewMailCommand && Context->mailbox->should_notify)
               {
                 char cmd[1024];
                 menu_status_line(cmd, sizeof(cmd), menu, NONULL(C_NewMailCommand));
@@ -1294,15 +1294,18 @@ int mutt_index_menu(struct MuttWindow *dlg)
       {
         if (mutt_mailbox_notify(Context ? Context->mailbox : NULL))
         {
+
           menu->redraw |= REDRAW_STATUS;
           if (C_BeepNew)
             mutt_beep(true);
-          if (C_NewMailCommand)
+		  /* Active is -nopoll tag is not set */
+          if (C_NewMailCommand && Context->mailbox->should_notify)
           {
-            char cmd[1024];
-            menu_status_line(cmd, sizeof(cmd), menu, NONULL(C_NewMailCommand));
-            if (mutt_system(cmd) != 0)
-              mutt_error(_("Error running \"%s\""), cmd);
+			printf("Mailbox that was notified: %s", Context->mailbox->name);
+		    char cmd[1024];
+		    menu_status_line(cmd, sizeof(cmd), menu, NONULL(C_NewMailCommand));
+		    if (mutt_system(cmd) != 0)
+		  	mutt_error(_("Error running \"%s\""), cmd);
           }
         }
       }

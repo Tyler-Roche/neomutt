@@ -101,6 +101,9 @@ struct Mailbox
   int *v2r;                           ///< Mapping from virtual to real msgno
   int vcount;                         ///< The number of virtual messages
 
+  bool *poll;                         ///<  Polling status of mailbox
+  bool *should_notify;                       ///<  Send notifications when mailbox gets new mail
+
   bool notified;                      ///< User has been notified
   enum MailboxType type;              ///< Mailbox type
   bool newly_created;                 ///< Mbox or mmdf just popped into existence
